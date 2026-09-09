@@ -78,6 +78,40 @@ pub fn resolve_section_for_write(
     })
 }
 
+/// Hash-free counterpart to [`resolve_section_for_write`] for replacement
+/// tools that take no caller hash (exact text matching is their guard, and
+/// the adapter's own whole-file fresh read guards the write).
+///
+/// Resolves `path` against a fresh outline of `full_content` and extracts the
+/// matched section, without any hash verification:
+/// [`SectionWriteError::HashMismatch`] is structurally unreachable here (the
+/// error type is shared with the hash-verified path so adapters can map all
+/// variants through one match arm).
+///
+/// The resolved region is the *only* region a scoped replacement may touch:
+/// adapters must match edits inside `section_content` and splice the result
+/// back once via [`splice_section`], never re-resolving the scope per edit
+/// and never touching sibling sections.
+pub fn resolve_section_for_edit(
+    full_content: &str,
+    path: &str,
+) -> Result<ResolvedSectionWrite, SectionWriteError> {
+    let outline = build_outline(full_content);
+    let section = resolve_section(&outline, path).map_err(|e| match e {
+        SectionResolveError::NotFound { path } => SectionWriteError::NotFound { path },
+        SectionResolveError::Ambiguous { path, candidates } => {
+            SectionWriteError::Ambiguous { path, candidates }
+        }
+    })?;
+
+    let section_content = extract_section(full_content, section);
+    Ok(ResolvedSectionWrite {
+        start_line: section.start_line,
+        end_line: section.end_line,
+        section_content,
+    })
+}
+
 /// Replace the inclusive `start_line..=end_line` range (1-indexed, in the same
 /// `full_content.split('\n')` coordinate system as [`extract_section`]) with
 /// `new_section_content`, and rejoin with `"\n"`.
@@ -155,6 +189,49 @@ mod tests {
         // The error type structurally carries no current-hash field - this
         // assertion documents that guarantee rather than testing a
         // Display/Debug string (there isn't one here to redact from).
+    }
+
+    #[test]
+    fn resolve_section_for_edit_happy_path() {
+        let content = "# A\nfirst\n# B\nsecond\nmore\n# C\nthird";
+        let resolved = resolve_section_for_edit(content, "B").unwrap();
+        assert_eq!(resolved.start_line, 3);
+        assert_eq!(resolved.end_line, 5);
+        assert_eq!(resolved.section_content, "# B\nsecond\nmore");
+    }
+
+    #[test]
+    fn resolve_section_for_edit_not_found() {
+        let content = "# A\nbody";
+        let err = resolve_section_for_edit(content, "Nonexistent").unwrap_err();
+        assert_eq!(
+            err,
+            SectionWriteError::NotFound {
+                path: "Nonexistent".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_section_for_edit_ambiguous() {
+        let content = "# Notes\nfirst\n# Notes\nsecond";
+        let err = resolve_section_for_edit(content, "Notes").unwrap_err();
+        match err {
+            SectionWriteError::Ambiguous { path, candidates } => {
+                assert_eq!(path, "Notes");
+                assert_eq!(candidates, vec!["Notes".to_string(), "Notes".to_string()]);
+            }
+            other => panic!("expected Ambiguous, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn resolve_section_for_edit_never_reports_hash_mismatch() {
+        // Hash-free by contract: an edit scoped to a section resolves it
+        // without any expected hash to compare against.
+        let content = "# A\nbody";
+        let resolved = resolve_section_for_edit(content, "A").unwrap();
+        assert_eq!(resolved.section_content, "# A\nbody");
     }
 
     #[test]

@@ -1,0 +1,156 @@
+{
+  "fixture": "replace-in-note-behavior",
+  "version": 1,
+  "description": "Canonical behavioral cases for hash-free exact text replacement with an optional section scope. This file is the single source of truth for both exposed adapters: the Memory MCP `replace_in_note` tool and the Autonomy native note-replacement tool (which must run a byte-identical snapshot of this file, recording this file's path and hash as provenance). Every case must be run through the exposed tool adapter (not a shared helper), asserting the exact resulting full-note bytes on success and exact byte-for-byte refusal (no write at all) on failure. Scope uniqueness counts overlapping occurrences; a scoped case matches only inside the resolved section; a batch applies progressively in memory but is validated in full before any write, so any failure leaves the note unchanged.",
+  "errorKinds": {
+    "not-found": "an edit's oldText has zero possible matches in the selected scope",
+    "ambiguous": "an edit's oldText has more than one possible (including overlapping) match in the selected scope",
+    "section-not-found": "the section path matches zero sections",
+    "section-ambiguous": "the section path matches more than one section"
+  },
+  "cases": [
+    {
+      "id": "whole-note-single-edit",
+      "description": "Unscoped replace: oldText occurs exactly once in the whole note; only the matched span changes.",
+      "content": "# Title\n\nfirst paragraph\n\nsecond paragraph",
+      "section": null,
+      "edits": [
+        { "oldText": "second paragraph", "newText": "second paragraph, edited" }
+      ],
+      "expect": "ok",
+      "expectedContent": "# Title\n\nfirst paragraph\n\nsecond paragraph, edited"
+    },
+    {
+      "id": "whole-note-zero-match",
+      "description": "Unscoped replace where oldText appears nowhere: refuse, bytes unchanged.",
+      "content": "alpha beta",
+      "section": null,
+      "edits": [
+        { "oldText": "gamma", "newText": "delta" }
+      ],
+      "expect": "error",
+      "error": "not-found",
+      "expectedContent": "alpha beta"
+    },
+    {
+      "id": "whole-note-multiple-match",
+      "description": "Unscoped replace where oldText appears twice: refuse as ambiguous, bytes unchanged.",
+      "content": "todo one\nlater todo",
+      "section": null,
+      "edits": [
+        { "oldText": "todo", "newText": "done" }
+      ],
+      "expect": "error",
+      "error": "ambiguous",
+      "expectedContent": "todo one\nlater todo"
+    },
+    {
+      "id": "overlapping-match-ambiguous",
+      "description": "oldText 'aa' fits at two overlapping positions in 'aaa': ambiguous even though a non-overlapping match count would report one.",
+      "content": "aaa",
+      "section": null,
+      "edits": [
+        { "oldText": "aa", "newText": "b" }
+      ],
+      "expect": "error",
+      "error": "ambiguous",
+      "expectedContent": "aaa"
+    },
+    {
+      "id": "scoped-unique-ignores-outside-duplicate",
+      "description": "Scoped replace: oldText occurs once inside the selected section and once outside it; only the inside occurrence changes and the outside text is untouched.",
+      "content": "# Intro\n\nthe replace target phrase outside Details\n\n## Details\n\nthe replace target phrase inside Details\n",
+      "section": "Details",
+      "edits": [
+        { "oldText": "the replace target phrase", "newText": "REPLACED TARGET" }
+      ],
+      "expect": "ok",
+      "expectedContent": "# Intro\n\nthe replace target phrase outside Details\n\n## Details\n\nREPLACED TARGET inside Details\n"
+    },
+    {
+      "id": "scoped-match-only-outside-refused",
+      "description": "Scoped replace where oldText exists only outside the selected section: refuse with the scoped not-found error, bytes unchanged.",
+      "content": "# A\n\nunique haystack text\n\n## B\n\nother body\n",
+      "section": "B",
+      "edits": [
+        { "oldText": "unique haystack text", "newText": "x" }
+      ],
+      "expect": "error",
+      "error": "not-found",
+      "expectedContent": "# A\n\nunique haystack text\n\n## B\n\nother body\n"
+    },
+    {
+      "id": "section-not-found",
+      "description": "Section path matches zero sections: refuse before validating edits, bytes unchanged.",
+      "content": "# A\n\nbody\n",
+      "section": "Missing",
+      "edits": [
+        { "oldText": "body", "newText": "replaced" }
+      ],
+      "expect": "error",
+      "error": "section-not-found",
+      "expectedContent": "# A\n\nbody\n"
+    },
+    {
+      "id": "section-ambiguous",
+      "description": "Section path matches two sections with the same heading: refuse as ambiguous, bytes unchanged.",
+      "content": "# Notes\n\nfirst\n\n# Notes\n\nsecond\n",
+      "section": "Notes",
+      "edits": [
+        { "oldText": "first", "newText": "replaced" }
+      ],
+      "expect": "error",
+      "error": "section-ambiguous",
+      "expectedContent": "# Notes\n\nfirst\n\n# Notes\n\nsecond\n"
+    },
+    {
+      "id": "progressive-batch-second-edit-sees-first-output",
+      "description": "Batch applies progressively: the second edit's oldText exists only after the first edit's output.",
+      "content": "alpha\n",
+      "section": null,
+      "edits": [
+        { "oldText": "alpha", "newText": "beta" },
+        { "oldText": "beta", "newText": "gamma" }
+      ],
+      "expect": "ok",
+      "expectedContent": "gamma\n"
+    },
+    {
+      "id": "failed-batch-leaves-note-unchanged",
+      "description": "Batch with one valid edit then one unmatchable edit: the whole batch is refused and the note's bytes are untouched (no partial write even though the first edit validated in memory).",
+      "content": "keep me\n\nold chunk\n",
+      "section": null,
+      "edits": [
+        { "oldText": "old chunk", "newText": "new chunk" },
+        { "oldText": "absent text", "newText": "never applied" }
+      ],
+      "expect": "error",
+      "error": "not-found",
+      "expectedContent": "keep me\n\nold chunk\n"
+    },
+    {
+      "id": "empty-oldtext-ambiguous",
+      "description": "Empty oldText 'matches' at every character boundary of non-empty content, so it is ambiguous - preserved historical behavior, not silently widened.",
+      "content": "hello\n",
+      "section": null,
+      "edits": [
+        { "oldText": "", "newText": "x" }
+      ],
+      "expect": "error",
+      "error": "ambiguous",
+      "expectedContent": "hello\n"
+    },
+    {
+      "id": "scoped-unique-inside-multiple-edits",
+      "description": "Scoped batch: two edits, each unique inside the selected section; text duplicated elsewhere in the note stays untouched.",
+      "content": "# A\n\nshared token here\n\n## B\n\nshared token inside\nmore shared token\n",
+      "section": "B",
+      "edits": [
+        { "oldText": "shared token inside", "newText": "first edited" },
+        { "oldText": "more shared token", "newText": "second edited" }
+      ],
+      "expect": "ok",
+      "expectedContent": "# A\n\nshared token here\n\n## B\n\nfirst edited\nsecond edited\n"
+    }
+  ]
+}
