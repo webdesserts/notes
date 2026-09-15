@@ -290,6 +290,38 @@ mod validate_sync_path {
             "empty path is rejected"
         );
     }
+
+    #[test]
+    fn adjacent_dots_in_names_do_not_count_as_parent_directory_segments() {
+        let index = Index::new(AUTHOR);
+
+        for path in [
+            "knowledge/Prime Curation Log — W34 (2026-08-20..24).md",
+            "a..b/notes...md",
+        ] {
+            let (_doc, uuid, fp) = doc_with_identity(path);
+            let node = index
+                .register_document(path, &uuid, &fp)
+                .unwrap_or_else(|error| panic!("legitimate adjacent-dot path {path:?} was rejected: {error}"));
+            assert_eq!(index.node_for_path(path), Some(node));
+        }
+
+        for path in ["../x.md", "a/../x.md", "a/../../x.md", "a/..", "a/../"] {
+            let (_doc, uuid, fp) = doc_with_identity(path);
+            let error = index.register_document(path, &uuid, &fp).unwrap_err();
+            assert_eq!(error.to_string(), "Path traversal not allowed", "{path:?}");
+        }
+
+        for path in [r"..\x.md", r"a/..\x.md"] {
+            let (_doc, uuid, fp) = doc_with_identity(path);
+            let error = index.register_document(path, &uuid, &fp).unwrap_err();
+            assert_eq!(error.to_string(), "Backslash in path not allowed", "{path:?}");
+        }
+
+        let (_doc, uuid, fp) = doc_with_identity("a//x.md");
+        let error = index.register_document("a//x.md", &uuid, &fp).unwrap_err();
+        assert_eq!(error.to_string(), "Empty path segment not allowed");
+    }
 }
 
 mod rebuild_caches {

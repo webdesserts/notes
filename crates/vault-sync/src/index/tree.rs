@@ -632,8 +632,9 @@ impl Index {
         if path.is_empty() {
             return Err(IndexError::InvalidPath("Empty path not allowed".into()));
         }
-        // Path traversal
-        if path.contains("..") {
+        // Parent-directory segments escape the vault root; adjacent dots inside a
+        // normal filename (for example, a date range) are ordinary path content.
+        if path.split('/').any(|segment| segment == "..") {
             return Err(IndexError::InvalidPath("Path traversal not allowed".into()));
         }
         // Empty segments (a//b.md)
