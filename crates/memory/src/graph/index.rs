@@ -28,6 +28,17 @@ impl GraphIndex {
         Self::default()
     }
 
+    /// Returns `true` when a vault-relative path lies in the top-level `archive/` directory.
+    ///
+    /// Archived notes stay readable by explicit path but are excluded from the graph,
+    /// watcher indexing and search. Nested directories named `archive` are not affected.
+    pub fn is_archived_rel_path(rel_path: &Path) -> bool {
+        matches!(
+            rel_path.components().next(),
+            Some(std::path::Component::Normal(c)) if c == "archive"
+        )
+    }
+
     /// Initialize the graph index by scanning the vault.
     ///
     /// Recursively scans all markdown files in the vault, extracts wiki-links,
@@ -35,7 +46,7 @@ impl GraphIndex {
     pub async fn initialize(&mut self, vault_path: &Path) -> Result<(), std::io::Error> {
         tracing::info!("Scanning vault for notes...");
 
-        let files = Self::get_all_markdown_files(vault_path).await?;
+        let files = Self::get_all_markdown_files_in(vault_path, vault_path).await?;
         tracing::info!("Found {} markdown files", files.len());
 
         for file_path in files {
@@ -53,8 +64,11 @@ impl GraphIndex {
         Ok(())
     }
 
-    /// Recursively get all markdown files in a directory.
-    async fn get_all_markdown_files(dir: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
+    /// Recursively get all markdown files in `dir`, skipping the vault's top-level `archive/`.
+    async fn get_all_markdown_files_in(
+        vault_root: &Path,
+        dir: &Path,
+    ) -> Result<Vec<PathBuf>, std::io::Error> {
         let mut files = Vec::new();
         let mut entries = fs::read_dir(dir).await?;
 
@@ -68,10 +82,15 @@ impl GraphIndex {
                 continue;
             }
 
+            if dir == vault_root && file_name_str == "archive" {
+                continue;
+            }
+
             let file_type = entry.file_type().await?;
             if file_type.is_dir() {
                 // Recursively scan subdirectories
-                let sub_files = Box::pin(Self::get_all_markdown_files(&path)).await?;
+                let sub_files =
+                    Box::pin(Self::get_all_markdown_files_in(vault_root, &path)).await?;
                 files.extend(sub_files);
             } else if file_type.is_file() && file_name_str.ends_with(".md") {
                 files.push(path);
@@ -121,7 +140,12 @@ impl GraphIndex {
     ///
     /// This removes any existing links for the note and replaces them with the new set.
     /// The path should be relative to the vault root (e.g., "knowledge/Note.md").
+    /// Paths inside the top-level `archive/` directory are ignored.
     pub fn update_note(&mut self, note_name: &str, path: PathBuf, links: HashSet<String>) {
+        if Self::is_archived_rel_path(&path) {
+            return;
+        }
+
         let path_key = path.to_string_lossy().to_string();
 
         // Remove old backlinks for this path
@@ -457,5 +481,78 @@ mod tests {
         // get_path returns one (for backward compat)
         let path = index.get_path("Index").unwrap();
         assert!(path.to_string_lossy().ends_with("Index.md"));
+    }
+
+    #[test]
+    fn test_is_archived_rel_path() {
+        assert!(GraphIndex::is_archived_rel_path(Path::new(
+            "archive/Old.md"
+        )));
+        assert!(GraphIndex::is_archived_rel_path(Path::new(
+            "archive/pending-consolidation/Old.md"
+        )));
+        assert!(!GraphIndex::is_archived_rel_path(Path::new(
+            "knowledge/Active.md"
+        )));
+        assert!(!GraphIndex::is_archived_rel_path(Path::new(
+            "projects/archive/Note.md"
+        )));
+        assert!(!GraphIndex::is_archived_rel_path(Path::new(
+            "archived/Note.md"
+        )));
+        assert!(!GraphIndex::is_archived_rel_path(Path::new("archive.md")));
+    }
+
+    #[tokio::test]
+    async fn test_initialize_skips_top_level_archive() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let root = temp_dir.path();
+        for (rel, content) in [
+            ("knowledge/Active.md", "Links to [[Old]]"),
+            ("projects/Sub/archive_note.md", "nested"),
+            ("projects/archive/Nested.md", "nested archive dir"),
+            (
+                "archive/pending-consolidation/Old.md",
+                "Links to [[Active]]",
+            ),
+        ] {
+            let path = root.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, content).unwrap();
+        }
+
+        let mut index = GraphIndex::new();
+        index.initialize(root).await.unwrap();
+
+        assert!(index.get_forward_links("knowledge/Active.md").is_some());
+        assert!(
+            index
+                .get_forward_links("projects/Sub/archive_note.md")
+                .is_some()
+        );
+        assert!(
+            index
+                .get_forward_links("projects/archive/Nested.md")
+                .is_some()
+        );
+        assert!(
+            index
+                .get_forward_links("archive/pending-consolidation/Old.md")
+                .is_none()
+        );
+        assert!(index.get_path("Old").is_none());
+        assert!(index.get_backlinks("Active").is_none());
+        assert_eq!(index.len(), 3);
+    }
+
+    #[test]
+    fn test_update_note_ignores_archived_paths() {
+        let mut index = GraphIndex::new();
+        let links: HashSet<String> = ["Target".to_string()].into_iter().collect();
+        index.update_note("Old", PathBuf::from("archive/Old.md"), links);
+
+        assert!(index.is_empty());
+        assert!(index.get_path("Old").is_none());
+        assert!(index.get_backlinks("Target").is_none());
     }
 }

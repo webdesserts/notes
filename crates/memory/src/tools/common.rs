@@ -267,4 +267,36 @@ mod tests {
         assert_eq!(uri, "b/note");
         assert!(exists);
     }
+
+    #[tokio::test]
+    async fn test_resolve_explicit_archive_path_without_graph_entry() {
+        let (temp_dir, storage, mut graph) = create_test_env().await;
+
+        fs::create_dir_all(temp_dir.path().join("archive/pending-consolidation"))
+            .await
+            .unwrap();
+        fs::write(
+            temp_dir
+                .path()
+                .join("archive/pending-consolidation/OldNote.md"),
+            "archived",
+        )
+        .await
+        .unwrap();
+        // Archived notes are never indexed in the graph
+        graph.update_note(
+            "OldNote",
+            PathBuf::from("archive/pending-consolidation/OldNote.md"),
+            HashSet::new(),
+        );
+        assert!(graph.get_path("OldNote").is_none());
+
+        let (uri, exists) =
+            resolve_note_uri(&storage, &graph, "archive/pending-consolidation/OldNote")
+                .await
+                .unwrap();
+
+        assert_eq!(uri, "archive/pending-consolidation/OldNote");
+        assert!(exists);
+    }
 }

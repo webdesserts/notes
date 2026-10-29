@@ -100,6 +100,12 @@ async fn process_events(
                 continue;
             }
 
+            // Skip the top-level archive/ directory (excluded from indexing and search)
+            let relative_path = path.strip_prefix(&vault_path).unwrap_or(path);
+            if GraphIndex::is_archived_rel_path(relative_path) {
+                continue;
+            }
+
             match event.kind {
                 DebouncedEventKind::Any => {
                     if path.exists() {
@@ -118,8 +124,7 @@ async fn process_events(
                             mtime_cache.insert(path.clone(), mtime);
                         }
 
-                        // Get relative path for embedding cache key
-                        let relative_path = path.strip_prefix(&vault_path).unwrap_or(path);
+                        // Relative path is the embedding cache key
                         let relative_path_str = relative_path.to_string_lossy().to_string();
 
                         // Now process the file

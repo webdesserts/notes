@@ -218,6 +218,10 @@ async fn get_all_notes(vault_path: &Path, graph: &GraphIndex) -> Vec<(String, St
     let mut notes = Vec::new();
 
     for rel_path in graph.all_paths() {
+        // Defense in depth: the graph should never contain archived notes
+        if GraphIndex::is_archived_rel_path(Path::new(rel_path)) {
+            continue;
+        }
         let full_path = vault_path.join(rel_path);
         if let Ok(content) = fs::read_to_string(&full_path).await {
             notes.push((rel_path.clone(), content));
