@@ -357,17 +357,6 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
-  custom-docker:
-    needs:
-      - plan
-      - announce
-    uses: ./.github/workflows/docker.yml
-    with:
-      plan: ${{ needs.plan.outputs.val }}
-    secrets: inherit
-    permissions:
-      "packages": "write"
-
   # Build + self-sign the desktop Tauri .dmg and attach it to the Release.
   # This is intentionally NON-GATING: cargo-dist (the homebrew/CLI cut) is the
   # must-ship, and a dmg hiccup must never block it. `continue-on-error: true`

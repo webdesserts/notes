@@ -10,8 +10,7 @@ Obsidian Memory is an [MCP](https://modelcontextprotocol.io/) server that lets C
 
 - **Graph navigation** - Wiki links, backlinks, neighborhood discovery
 - **Semantic search** - Fast, offline embeddings (all-MiniLM-L6-v2) with Personalized PageRank graph boosting
-- **Memory system** - Working Memory, Log, weekly journals, project notes
-- **Project discovery** - Auto-loads project notes based on git remotes
+- **Note recommendations** - Graph- and embedding-based `recommend` tool for related notes
 - **Note management** - Create, read, update, move, and delete notes
 
 ## Installation
@@ -26,7 +25,7 @@ brew install webdesserts/tap/notes-sync
 ### Option 2: Shell Script (Mac/Linux)
 
 ```bash
-curl -fsSL https://github.com/webdesserts/obsidian-memory/releases/latest/download/notes-sync-installer.sh | sh
+curl -fsSL https://github.com/webdesserts/notes/releases/latest/download/notes-sync-installer.sh | sh
 ```
 
 ### Option 3: Build from Source
@@ -34,47 +33,12 @@ curl -fsSL https://github.com/webdesserts/obsidian-memory/releases/latest/downlo
 Requires Rust toolchain ([rustup.rs](https://rustup.rs)).
 
 ```bash
-git clone https://github.com/webdesserts/obsidian-memory.git
-cd obsidian-memory
+git clone https://github.com/webdesserts/notes.git
+cd notes
 cargo install --path crates/notes-sync
 ```
 
 Note: Building from source downloads the embedding model from HuggingFace at runtime on first launch. Pre-built binaries have the model embedded and work offline or on corporate networks that block HuggingFace.
-
-### Option 4: Docker (Server Deployment)
-
-For running as a persistent HTTP server behind a reverse proxy.
-
-```bash
-cd docker
-DOMAIN=example.com NOTES_PATH=/path/to/vault docker compose up -d
-```
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DOMAIN` | Yes | Public domain for the service (used for TLS and WebAuthn origin, e.g., `example.com`) |
-| `NOTES_PATH` | Yes | Absolute path to vault directory on the host |
-| `VERSION` | No | Image tag (defaults to `latest`) |
-| `RUST_LOG` | No | Log level (defaults to `info`) |
-
-The compose file expects an external Docker network called `proxy` that your reverse proxy also joins. Create it before starting:
-
-```bash
-docker network create proxy
-```
-
-#### Reverse Proxy Requirements
-
-The services don't handle TLS or authentication routing themselves — that's the reverse proxy's job. See [`docker/Caddyfile`](docker/Caddyfile) for a working Caddy example. Any reverse proxy needs to handle:
-
-- **Auth endpoints** — `/auth/*` → `auth-service:3001` (strip the `/auth` prefix)
-- **MCP endpoint** — `/mcp*` → `memory:3000` (protected via auth delegation to `auth-service:3001/validate`)
-- **Sync WebSocket** — `/sync` → `memory:8080`
-
-Important proxy considerations:
-- The MCP endpoint uses SSE streaming — disable response buffering for `/mcp*`
-- MCP operations (especially embedding computation) can be slow — set read/write timeouts to at least 5 minutes
-- The auth-service `/validate` endpoint works with any proxy that supports forward-auth / auth delegation (Caddy `forward_auth`, nginx `auth_request`, Traefik `ForwardAuth`, etc.)
 
 ## Usage
 
@@ -97,7 +61,7 @@ The server communicates over stdio and is designed to be launched by an MCP clie
 ### Claude Code Configuration
 
 ```bash
-claude mcp add obsidian-memory --scope user \
+claude mcp add notes --scope user \
   -- notes mcp io --vault ~/notes
 ```
 
@@ -108,7 +72,7 @@ Add to `~/.config/opencode/opencode.json`:
 ```json
 {
   "mcp": {
-    "obsidian-memory": {
+    "notes": {
       "type": "local",
       "command": ["notes", "mcp", "io", "--vault", "~/notes"],
       "enabled": true
@@ -193,8 +157,6 @@ cargo build --features embedded-model -p notes-sync
 **Vault not found**: Ensure the `--vault` path is an existing directory. Tilde expansion (`~/notes`) is supported.
 
 **Search returns no results**: The semantic index builds on first run. Give it a few seconds to index your vault. Large vaults (1000+ notes) may take longer.
-
-**Project notes not loading**: Project discovery looks for notes in `projects/` that match either your git remote URL (e.g., `github.com/user/repo`) or your current directory name. Create a note like `projects/my-repo.md` to get started.
 
 ## License
 

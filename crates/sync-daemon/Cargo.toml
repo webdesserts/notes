@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Peer identity + file-backed key storage (FileKeyStorage, IdentityKey).
-p2p-core = { path = "../p2p-core" }
+p2p-core.workspace = true
 # vault-sync's default `network` feature carries the iroh sync seam (SyncNode,
 # gossip, PeerRegistry); `--no-default-features` is the pure Loro + FileSystem core.
 vault-sync = { path = "../vault-sync" }

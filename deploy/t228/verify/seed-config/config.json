@@ -1,9 +1,0 @@
-{
-  "api_keys": [
-    {
-      "key": "t228-verify-api-key-do-not-reuse",
-      "name": "t228-verify-bot",
-      "active": true
-    }
-  ]
-}

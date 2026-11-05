@@ -114,10 +114,15 @@ fn main() -> Result<()> {
         // Plugins must be registered before setup() so that their APIs are
         // available inside the setup hook via app.store() and app.autolaunch().
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None, // no extra args — vault path is read from the store, not CLI
-        ))
+        // app_name pins the LaunchAgent to ~/Library/LaunchAgents/com.webdesserts.notes-sync.plist
+        // (Label com.webdesserts.notes-sync); the default would follow productName. No extra
+        // args: the vault path is read from the store, not the CLI.
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .app_name("com.webdesserts.notes-sync")
+                .macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent)
+                .build(),
+        )
         .setup(move |app| {
             // --- Vault path resolution (amendment S2: daemon_config built here) ---
             //

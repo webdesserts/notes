@@ -4,19 +4,17 @@ members = [
     "crates/notes-sync",
     "crates/notes-core",
     "crates/semantic-embeddings",
-    "crates/auth-service",
-    "crates/p2p-core",
     "crates/sync-daemon",
     "crates/desktop",
     "crates/vault-sync",
 ]
 
 [workspace.package]
-version = "0.5.3"
+version = "0.6.0"
 edition = "2024"
 authors = ["Michael Mullins"]
 license = "Apache-2.0"
-repository = "https://github.com/webdesserts/obsidian-memory"
+repository = "https://github.com/webdesserts/notes"
 
 [workspace.dependencies]
 # Utilities
@@ -25,7 +23,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Logging
-log = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
@@ -68,20 +65,14 @@ uuid = { version = "1", features = ["v4", "js"] }
 
 # Random number generation (for peer ID generation)
 rand = "0.9"
-getrandom = { version = "0.2", features = ["js"] }
-getrandom_0_3 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
-
-# Ed25519 keypairs for peer identity (pure Rust, WASM-compatible)
-ed25519-dalek = { version = "2", features = ["rand_core"] }
-
-# WASM (for sync-wasm)
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-js-sys = "0.3"
-serde-wasm-bindgen = "0.6"
 
 # Testing
 tempfile = "3"
+
+# P2P transport (iroh endpoint, mDNS discovery, pairing, gossip), extracted to its own repo.
+# For cross-repo work, add an uncommitted `[patch."https://github.com/webdesserts/p2p-core"]`
+# `p2p-core = { path = "../p2p-core" }` override in .cargo/config.toml.
+p2p-core = { git = "https://github.com/webdesserts/p2p-core.git", rev = "d15f1c2498fcca0476dec9d441f665d16e588a85" }
 
 # The profile that 'dist' will build with
 [profile.dist]

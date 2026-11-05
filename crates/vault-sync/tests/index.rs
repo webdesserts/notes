@@ -302,7 +302,9 @@ mod validate_sync_path {
             let (_doc, uuid, fp) = doc_with_identity(path);
             let node = index
                 .register_document(path, &uuid, &fp)
-                .unwrap_or_else(|error| panic!("legitimate adjacent-dot path {path:?} was rejected: {error}"));
+                .unwrap_or_else(|error| {
+                    panic!("legitimate adjacent-dot path {path:?} was rejected: {error}")
+                });
             assert_eq!(index.node_for_path(path), Some(node));
         }
 
@@ -315,7 +317,11 @@ mod validate_sync_path {
         for path in [r"..\x.md", r"a/..\x.md"] {
             let (_doc, uuid, fp) = doc_with_identity(path);
             let error = index.register_document(path, &uuid, &fp).unwrap_err();
-            assert_eq!(error.to_string(), "Backslash in path not allowed", "{path:?}");
+            assert_eq!(
+                error.to_string(),
+                "Backslash in path not allowed",
+                "{path:?}"
+            );
         }
 
         let (_doc, uuid, fp) = doc_with_identity("a//x.md");
