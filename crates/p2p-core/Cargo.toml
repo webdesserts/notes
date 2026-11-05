@@ -33,7 +33,7 @@ hmac = "0.12"
 # off-LAN classifier), `EndpointId` + `address_lookup` (used by the mDNS actor);
 # `iroh-relay` with the `server` feature supplies the embedded relay server.
 # `default` enables direct socket binding (mDNS lives on real LAN interfaces);
-# p2p-core is unconditionally native, so this mirrors sync-core's `native` feature.
+# p2p-core is unconditionally native.
 # Versions mirror sync-daemon's declarations.
 iroh = { version = "1.0.0-rc.1", default-features = false, features = [
     "tls-ring",
@@ -73,8 +73,8 @@ fs2 = "0.4"
 
 [dev-dependencies]
 # `rt-multi-thread` + `time` are for the relocated `relay_probe` example's bare
-# `#[tokio::main]` + `tokio::spawn` + `tokio::time` (it formerly compiled under
-# sync-core's wider dev graph; p2p-core's narrower graph needs them explicit).
+# `#[tokio::main]` + `tokio::spawn` + `tokio::time` (its previous home had a
+# wider dev graph; p2p-core's narrower graph needs them explicit).
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time"] }
 tempfile.workspace = true
 # `relay_probe` surfaces iroh's relay-client logs via `RUST_LOG` (EnvFilter).

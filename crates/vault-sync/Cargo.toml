@@ -4,6 +4,16 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["network"]
+# The vault-sync network layer (SyncNodeSeam, VaultGossip, PeerRegistry,
+# RejectSyncHandler) over p2p-core. p2p-core is native-only today, so
+# `--no-default-features` is the pure Loro + FileSystem build.
+network = ["dep:p2p-core", "dep:anyhow", "dep:bytes", "dep:n0-future", "dep:tokio"]
+# Test-only relay-only constructors (forwards to p2p-core/test-util). Never
+# enabled in production builds.
+test-util = ["network", "p2p-core/test-util"]
+
 [dependencies]
 async-trait.workspace = true
 bincode.workspace = true
@@ -20,6 +30,15 @@ tracing.workspace = true
 # (bincode encodes the UUID as 16 bytes, keeping the wire compact).
 uuid = { workspace = true, features = ["serde"] }
 web-time.workspace = true
+
+# --- `network` feature ---
+p2p-core = { path = "../p2p-core", optional = true }
+anyhow = { workspace = true, optional = true }
+bytes = { version = "1", optional = true }
+# Cross-platform task spawning for the gossip decode pump.
+n0-future = { version = "0.3", optional = true }
+# Only tokio::sync (channels); not the workspace `full` feature set.
+tokio = { version = "1", features = ["sync"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }

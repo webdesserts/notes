@@ -2,25 +2,23 @@
 //!
 //! These tests verify that two `SyncNode`s can discover and communicate with
 //! each other through an `EmbeddedRelay` when they have no direct route.
-//! Unlike the network_integration tests in sync-core (which use MemoryLookup
-//! for direct connectivity), here the relay is the only path between nodes.
+//! Unlike direct-connectivity tests (which use MemoryLookup), here the relay is
+//! the only path between nodes.
 //!
 //! sync-daemon is always native (no WASM target), so no cfg guards are needed.
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use p2p_core::PeerId;
+use p2p_core::allowlist::{AllowlistStorage, InMemoryAllowlist};
 use p2p_core::{EndpointId, RelayUrl, SecretKey, Watcher};
-use sync_core::allowlist::{AllowlistStorage, InMemoryAllowlist};
-use sync_core::network::gossip::GossipEvent;
-use sync_core::network::streams::connect_and_sync_raw;
-use sync_core::network::{SyncNode, SyncNodeSeam, VaultGossipExt};
-use sync_core::peer_id::{PeerId, VaultId};
-use sync_core::sync::SyncMessage;
+use vault_sync::VaultId;
+use vault_sync::network::gossip::GossipEvent;
+use vault_sync::network::{RejectSyncHandler, SyncNode, SyncNodeSeam, VaultGossipExt};
 // `NativeFs`/`InMemoryFs` (via `common`) implement vault-sync's `FileSystem`.
-use p2p_core::{EmbeddedRelay, PeerAddr, RelayAddr};
+use p2p_core::{EmbeddedRelay, RelayAddr};
 use sync_daemon::daemon::Daemon;
 use sync_daemon::persistence::PeerRelay;
 use sync_daemon::watcher::FileEvent;
@@ -32,140 +30,6 @@ mod common;
 
 // ── tests ─────────────────────────────────────────────────────────────────
 
-/// Two nodes configured with only an embedded relay as their routing path
-/// can establish gossip connectivity and complete a QUIC sync round-trip.
-///
-/// This exercises the path where peers can't reach each other directly
-/// (e.g., across NATs) and must relay traffic through the daemon's relay.
-///
-/// IGNORED: a known pre-existing relay-establishment flake — it intermittently
-/// times out waiting for gossip NeighborUp THROUGH the relay (before any sync
-/// runs). It is transport-only: it drives the inbound handler manually via
-/// `inbound_sync_rx` + `connect_and_sync_raw` with a hand-built sync-core
-/// `SyncMessage`, bypassing both vault-sync and the daemon's pumped path, so the
-/// pump swap (X-b) leaves it byte-identical and neither fixes nor breaks it. Run
-/// it explicitly with `--ignored` to exercise the relay-establishment path when
-/// the relay cooperates.
-#[ignore = "pre-existing relay-establishment flake; transport-only, bypasses the pump"]
-#[tokio::test]
-async fn test_sync_through_embedded_relay() -> anyhow::Result<()> {
-    // Start the relay on a random OS-assigned port.
-    let bind_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let relay = EmbeddedRelay::start(bind_addr).await?;
-    let relay_url = relay.relay_url().clone();
-
-    // Derive each node's PeerId from its seed so we can pre-populate both allowlists.
-    // Both nodes must allow each other for gossip connections to be accepted.
-    let allowlist_a = Arc::new(InMemoryAllowlist::new());
-    let allowlist_b = Arc::new(InMemoryAllowlist::new());
-
-    // Create two nodes that only know about the relay — no direct address
-    // exchange. They can only reach each other by routing through the relay.
-    let (node_a, inbound_rx_a) = SyncNode::new(
-        common::seed(101),
-        std::slice::from_ref(&relay_url),
-        allowlist_a.clone(),
-    )
-    .await?;
-    let (node_b, _inbound_rx_b) = SyncNode::new(
-        common::seed(102),
-        std::slice::from_ref(&relay_url),
-        allowlist_b.clone(),
-    )
-    .await?;
-
-    // Pre-populate each allowlist with the other node's PeerId so gossip is accepted.
-    let peer_a = PeerId::from_bytes(*node_a.node_id().as_bytes());
-    let peer_b = PeerId::from_bytes(*node_b.node_id().as_bytes());
-    allowlist_a.add_peer(peer_b, "node-b").await?;
-    allowlist_b.add_peer(peer_a, "node-a").await?;
-
-    let vault_id: VaultId = "cafebabe0beef001".parse().unwrap();
-
-    // Node A subscribes with no bootstrap peers — it waits for B.
-    let mut gossip_a = node_a.join_vault_gossip(&vault_id, vec![]).await?;
-
-    // Node B bootstraps off A's node ID (it knows A's identity but not its
-    // direct address — the relay handles the actual routing).
-    let mut gossip_b = node_b
-        .join_vault_gossip(&vault_id, vec![node_a.node_id()])
-        .await?;
-
-    // Wait for B to establish a gossip neighbour relationship with A via relay.
-    // Allow extra time since the relay adds a network hop.
-    tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            match gossip_b.event_rx.recv().await {
-                Some(GossipEvent::NeighborUp(id)) => {
-                    assert_eq!(id, node_a.node_id(), "B's neighbor should be A");
-                    break;
-                }
-                Some(_) => continue,
-                None => panic!("gossip_b event channel closed before NeighborUp"),
-            }
-        }
-    })
-    .await
-    .expect("timed out waiting for gossip NeighborUp through relay");
-
-    // Perform a QUIC sync round-trip through the relay.
-    // Drive the server's inbound handler in the background.
-    let expected_response = SyncMessage::SyncResponse {
-        registry_updates: None,
-        document_updates: HashMap::from([(
-            "notes/relay-test.md".to_string(),
-            b"relay-sync-data".to_vec(),
-        )]),
-    };
-    let response_bytes = bincode::serialize(&expected_response)?;
-    let response_bytes_clone = response_bytes.clone();
-
-    let mut inbound_rx = inbound_rx_a;
-    tokio::spawn(async move {
-        while let Some(req) = inbound_rx.recv().await {
-            let _ = req.reply_tx.send(response_bytes_clone.clone());
-        }
-    });
-
-    // B connects to A and sends a sync request, routing through the relay (B knows
-    // A's identity + the shared relay, not a direct address).
-    let peer_a_addr = PeerAddr::new(node_a.node_id()).with_relay(relay_url.clone());
-    let request = SyncMessage::SyncRequest {
-        registry_version: vec![1, 2, 3],
-        document_versions: HashMap::from([("notes/relay-test.md".to_string(), vec![0u8; 4])]),
-    };
-    let request_bytes = bincode::serialize(&request)?;
-
-    let received_bytes = tokio::time::timeout(
-        Duration::from_secs(30),
-        connect_and_sync_raw(&node_b, peer_a_addr, &request_bytes),
-    )
-    .await
-    .expect("timed out waiting for QUIC sync response through relay")?;
-
-    // Verify the response matches what the server sent.
-    let response: SyncMessage = bincode::deserialize(&received_bytes)?;
-    match response {
-        SyncMessage::SyncResponse {
-            registry_updates,
-            document_updates,
-        } => {
-            assert!(registry_updates.is_none());
-            let data = document_updates
-                .get("notes/relay-test.md")
-                .expect("missing relay-test.md in response");
-            assert_eq!(data, b"relay-sync-data");
-        }
-        _ => panic!("expected SyncResponse, got something else"),
-    }
-
-    // Clean up.
-    gossip_a.event_rx.close();
-    relay.shutdown().await;
-
-    Ok(())
-}
-
 /// `add_peer_relay` registers a relay hint that is resolvable via the node's
 /// peer lookup service.
 ///
@@ -176,7 +40,8 @@ async fn test_sync_through_embedded_relay() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_add_peer_relay_registers_resolvable_hint() -> anyhow::Result<()> {
     let allowlist = Arc::new(InMemoryAllowlist::new());
-    let (node, _inbound_rx) = SyncNode::new(common::seed(10), &[], allowlist).await?;
+    let node = SyncNode::new_with_sync_handler(common::seed(10), &[], allowlist, RejectSyncHandler)
+        .await?;
 
     // Use a second node's id as the "peer" and a standalone relay URL.
     let bind_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
@@ -231,7 +96,8 @@ async fn test_add_peer_relay_registers_resolvable_hint() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_add_peer_relay_ignores_self_id() -> anyhow::Result<()> {
     let allowlist = Arc::new(InMemoryAllowlist::new());
-    let (node, _inbound_rx) = SyncNode::new(common::seed(30), &[], allowlist).await?;
+    let node = SyncNode::new_with_sync_handler(common::seed(30), &[], allowlist, RejectSyncHandler)
+        .await?;
 
     let bind_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let relay = EmbeddedRelay::start(bind_addr).await?;
@@ -261,7 +127,8 @@ async fn test_add_peer_relay_ignores_self_id() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_empty_peer_relays_leaves_lookup_empty() -> anyhow::Result<()> {
     let allowlist = Arc::new(InMemoryAllowlist::new());
-    let (node, _inbound_rx) = SyncNode::new(common::seed(20), &[], allowlist).await?;
+    let node = SyncNode::new_with_sync_handler(common::seed(20), &[], allowlist, RejectSyncHandler)
+        .await?;
 
     // A deterministic peer id derived from a key seed (distinct from the node's own seed).
     let peer_secret = SecretKey::from_bytes(&[99u8; 32]);
@@ -304,131 +171,109 @@ async fn test_non_home_relay_hint_resolves_and_routes() -> anyhow::Result<()> {
     // Start two separate relays — R_a is A's home, R_b is B's home.
     let relay_a = EmbeddedRelay::start("127.0.0.1:0".parse().unwrap()).await?;
     let relay_b = EmbeddedRelay::start("127.0.0.1:0".parse().unwrap()).await?;
-    let url_a = relay_a.relay_url().clone();
-    let url_b = relay_b.relay_url().clone();
+    let url_a: RelayAddr = relay_a.relay_url().clone();
+    let url_b: RelayAddr = relay_b.relay_url().clone();
 
-    // Pre-populate allowlists so each node accepts the other's gossip connections.
-    let allowlist_a = Arc::new(InMemoryAllowlist::new());
-    let allowlist_b = Arc::new(InMemoryAllowlist::new());
+    // Node A: home relay = R_a. Node B: home relay = R_b. Neither node has the
+    // other's relay in its own RelayMap. Both run the daemon's pumped inbound
+    // handler, so the sync exchange below is the production vault-sync protocol.
+    let node_a = common::build_node_with_relay(51, &url_a).await?;
+    let node_b = common::build_node_with_relay(52, &url_b).await?;
+    node_a.allowlist.add_peer(node_b.node_id, "node-b").await?;
+    node_b.allowlist.add_peer(node_a.node_id, "node-a").await?;
 
-    // Node A: home relay = R_a (url_a is in its RelayMap).
-    // Node B: home relay = R_b (url_b is in its RelayMap).
-    // Neither node has the other's relay in its own RelayMap.
-    let (node_a, inbound_rx_a) = SyncNode::new(
-        common::seed(51),
-        std::slice::from_ref(&url_a),
-        allowlist_a.clone(),
-    )
-    .await?;
-    let (node_b, _inbound_rx_b) = SyncNode::new(
-        common::seed(52),
-        std::slice::from_ref(&url_b),
-        allowlist_b.clone(),
-    )
-    .await?;
-
-    let peer_a = PeerId::from_bytes(*node_a.node_id().as_bytes());
-    let peer_b = PeerId::from_bytes(*node_b.node_id().as_bytes());
-    allowlist_a.add_peer(peer_b, "node-b").await?;
-    allowlist_b.add_peer(peer_a, "node-a").await?;
+    let a_id = node_a.sync_node.node_id();
+    let b_id = node_b.sync_node.node_id();
 
     // Seed per-peer relay hints in both directions.
     // B learns to reach A through R_a (not in B's RelayMap — non-home relay routing).
-    node_b.add_peer_relay(node_a.node_id(), &url_a);
+    node_b.sync_node.add_peer_relay(a_id, &url_a);
     // A learns to reach B through R_b (not in A's RelayMap — mirror direction).
-    node_a.add_peer_relay(node_b.node_id(), &url_b);
+    node_a.sync_node.add_peer_relay(b_id, &url_b);
 
     let vault_id: VaultId = "deadbeef00000001".parse().unwrap();
 
     // A subscribes with no bootstrap peers; B bootstraps from A's bare EndpointId.
     // The hint in B's lookup provides the relay path to A.
-    let mut gossip_a = node_a.join_vault_gossip(&vault_id, vec![]).await?;
-    let mut gossip_b = node_b
-        .join_vault_gossip(&vault_id, vec![node_a.node_id()])
+    let gossip_a = node_a
+        .sync_node
+        .join_vault_gossip(&vault_id, vec![])
+        .await?;
+    let gossip_b = node_b
+        .sync_node
+        .join_vault_gossip(&vault_id, vec![a_id])
         .await?;
 
-    // Assert NeighborUp on both sides.
-    tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            match gossip_b.event_rx.recv().await {
-                Some(GossipEvent::NeighborUp(id)) => {
-                    assert_eq!(id, node_a.node_id(), "B's neighbor should be A");
-                    break;
-                }
-                Some(_) => continue,
-                None => panic!("gossip_b event channel closed before NeighborUp"),
-            }
-        }
-    })
-    .await
-    .expect("timed out waiting for B's NeighborUp");
+    // Drive both nodes as full Daemons.
+    let a_vault = node_a.vault.clone();
+    let a_fs = node_a.fs.clone();
+    let b_vault = node_b.vault.clone();
+    let b_fs = node_b.fs.clone();
 
-    tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            match gossip_a.event_rx.recv().await {
-                Some(GossipEvent::NeighborUp(id)) => {
-                    assert_eq!(id, node_b.node_id(), "A's neighbor should be B");
-                    break;
-                }
-                Some(_) => continue,
-                None => panic!("gossip_a event channel closed before NeighborUp"),
-            }
-        }
-    })
-    .await
-    .expect("timed out waiting for A's NeighborUp");
+    let (_a_file_tx, a_file_rx) = mpsc::unbounded_channel::<FileEvent>();
+    let a_shutdown = CancellationToken::new();
+    let mut daemon_a = Daemon::new(
+        a_vault.clone(),
+        node_a.sync_node,
+        gossip_a,
+        a_file_rx,
+        None,
+        node_a.allowlist.clone(),
+        "device-a".to_string(),
+        None,
+        "/test-vault-hint-a".into(),
+        a_shutdown.clone(),
+    );
+    daemon_a.set_inbound_seen_rx(node_a.inbound_seen_rx);
 
-    // Assert a QUIC sync round-trip (B→A direction).
-    let expected_response = SyncMessage::SyncResponse {
-        registry_updates: None,
-        document_updates: HashMap::from([(
-            "notes/relay-hint-test.md".to_string(),
-            b"relay-hint-data".to_vec(),
-        )]),
-    };
-    let response_bytes = bincode::serialize(&expected_response)?;
-    let response_bytes_clone = response_bytes.clone();
+    let (_b_file_tx, b_file_rx) = mpsc::unbounded_channel::<FileEvent>();
+    let b_shutdown = CancellationToken::new();
+    let mut daemon_b = Daemon::new(
+        b_vault.clone(),
+        node_b.sync_node,
+        gossip_b,
+        b_file_rx,
+        None,
+        node_b.allowlist.clone(),
+        "device-b".to_string(),
+        None,
+        "/test-vault-hint-b".into(),
+        b_shutdown.clone(),
+    );
+    daemon_b.set_inbound_seen_rx(node_b.inbound_seen_rx);
 
-    let mut inbound_rx = inbound_rx_a;
-    tokio::spawn(async move {
-        while let Some(req) = inbound_rx.recv().await {
-            let _ = req.reply_tx.send(response_bytes_clone.clone());
-        }
-    });
+    let a_loop = tokio::spawn(async move { daemon_a.run_loop().await });
+    let b_loop = tokio::spawn(async move { daemon_b.run_loop().await });
 
-    // Dial A by BARE id: the per-peer relay hint seeded above (B → A through R_a)
-    // is what must resolve the route, which is exactly what this test exercises.
-    let peer_a_addr = PeerAddr::new(node_a.node_id());
-    let request = SyncMessage::SyncRequest {
-        registry_version: vec![1, 2, 3],
-        document_versions: HashMap::from([("notes/relay-hint-test.md".to_string(), vec![0u8; 4])]),
-    };
-    let request_bytes = bincode::serialize(&request)?;
-
-    let received_bytes = tokio::time::timeout(
-        Duration::from_secs(30),
-        connect_and_sync_raw(&node_b, peer_a_addr, &request_bytes),
-    )
-    .await
-    .expect("timed out waiting for QUIC sync response")?;
-
-    let response: SyncMessage = bincode::deserialize(&received_bytes)?;
-    match response {
-        SyncMessage::SyncResponse {
-            registry_updates,
-            document_updates,
-        } => {
-            assert!(registry_updates.is_none());
-            let data = document_updates
-                .get("notes/relay-hint-test.md")
-                .expect("missing relay-hint-test.md in response");
-            assert_eq!(data, b"relay-hint-data");
-        }
-        _ => panic!("expected SyncResponse, got something else"),
+    // A writes a note; B must pull it. B reaches A only through the per-peer
+    // hint (R_a is not in B's RelayMap), so convergence proves the hint resolves
+    // the route for both gossip and the pumped vault-sync exchange.
+    a_fs.write("notes/relay-hint-test.md", b"relay-hint-data")
+        .await?;
+    {
+        let vault = a_vault.lock().await;
+        vault.on_file_changed("notes/relay-hint-test.md").await?;
     }
+    common::wait_until(
+        "B pulls A's note through the non-home relay hint",
+        Duration::from_secs(30),
+        || {
+            let fs = b_fs.clone();
+            async move {
+                matches!(
+                    fs.read("notes/relay-hint-test.md").await,
+                    Ok(data) if data == b"relay-hint-data"
+                )
+            }
+        },
+    )
+    .await;
 
     // Clean up.
-    gossip_a.event_rx.close();
+    a_shutdown.cancel();
+    b_shutdown.cancel();
+    a_loop.abort();
+    b_loop.abort();
     relay_a.shutdown().await;
     relay_b.shutdown().await;
 
@@ -458,7 +303,7 @@ async fn test_non_home_relay_hint_resolves_and_routes() -> anyhow::Result<()> {
 ///     supervisor_heals_after_peer_relay_reap
 /// ```
 ///
-/// CAVEAT (in-process faithfulness): `SyncNode::new` always enables mDNS, so two
+/// CAVEAT (in-process faithfulness): `SyncNode::new_with_sync_handler` always enables mDNS, so two
 /// localhost nodes may discover each other's direct addresses and reconnect
 /// without the relay — masking the bug. The truly off-LAN property (both home
 /// relays unreachable to the dialer, relay the only path) is only guaranteed in
@@ -1143,7 +988,7 @@ async fn supervisor_recovers_offlan_peer_from_cross_product_seed() -> anyhow::Re
 
 /// A node built with a SET of relays (`&[relay_a, relay_b]`) homes on ONE of them.
 ///
-/// This is the Tier-2 wire fix: `SyncNode::new` now takes a relay slice and builds
+/// This is the Tier-2 wire fix: `SyncNode::new_with_sync_handler` now takes a relay slice and builds
 /// `RelayMode::Custom(RelayMap::from_iter(set))`, so a laptop can home on the public
 /// relays it has learned (and fail over across them). This test pins the foundation:
 /// a multi-relay `RelayMap` actually homes the endpoint (it doesn't panic or refuse),
@@ -1167,10 +1012,11 @@ async fn relay_map_homes_on_one_of_a_set() -> anyhow::Result<()> {
     // Relay-only so the endpoint MUST select a relay home (no IP transport can mask
     // the relay-home selection we're testing).
     let allowlist = Arc::new(InMemoryAllowlist::new());
-    let (node, _inbound_rx) = SyncNode::new_relay_only(
+    let node = SyncNode::new_relay_only_with_sync_handler(
         common::seed(120),
         &[url_a.clone(), url_b.clone()],
         allowlist,
+        RejectSyncHandler,
     )
     .await?;
 
@@ -1226,13 +1072,14 @@ async fn relay_map_fails_over_when_home_dies() -> anyhow::Result<()> {
     let url_b: RelayUrl = relay_b.relay_url().as_str().parse().unwrap();
 
     let allowlist = Arc::new(InMemoryAllowlist::new());
-    let (node, _inbound_rx) = SyncNode::new_relay_only(
+    let node = SyncNode::new_relay_only_with_sync_handler(
         common::seed(121),
         &[
             RelayAddr::parse(&url_a.to_string()).unwrap(),
             RelayAddr::parse(&url_b.to_string()).unwrap(),
         ],
         allowlist,
+        RejectSyncHandler,
     )
     .await?;
 
@@ -1283,7 +1130,7 @@ async fn relay_map_fails_over_when_home_dies() -> anyhow::Result<()> {
 ///
 /// This pins the C5 laptop wire: at startup a laptop (no embedded relay) parses its
 /// persisted `known_public_relays` into a `RelayUrl` slice and hands it to
-/// `SyncNode::new` as the RelayMap. Here we model that exact transform — a
+/// `SyncNode::new_with_sync_handler` as the RelayMap. Here we model that exact transform — a
 /// `Vec<String>` public set → `Vec<RelayUrl>` → `new_relay_only` — and assert the
 /// endpoint actually homes on the public relay it was given. Relay-only so no IP
 /// transport can mask the relay-home selection.
@@ -1304,8 +1151,13 @@ async fn laptop_homes_on_persisted_public_relay() -> anyhow::Result<()> {
         .collect();
 
     let allowlist = Arc::new(InMemoryAllowlist::new());
-    let (node, _inbound_rx) =
-        SyncNode::new_relay_only(common::seed(124), &home_relays, allowlist).await?;
+    let node = SyncNode::new_relay_only_with_sync_handler(
+        common::seed(124),
+        &home_relays,
+        allowlist,
+        RejectSyncHandler,
+    )
+    .await?;
 
     tokio::time::timeout(Duration::from_secs(30), node.endpoint_for_test().online())
         .await
@@ -1334,7 +1186,7 @@ async fn laptop_homes_on_persisted_public_relay() -> anyhow::Result<()> {
 /// This documents the never-met-a-server edge: an empty public set → empty relay
 /// slice → `RelayMode::Disabled`. The node still constructs and runs (it keeps its
 /// IP transports + mDNS + peer_lookup for LAN-direct sync), it simply has no relay
-/// home. We use the regular `SyncNode::new` here — NOT `new_relay_only` — because a
+/// home. We use the regular `SyncNode::new_with_sync_handler` here — NOT `new_relay_only_with_sync_handler` — because a
 /// real laptop in this state keeps its IP transports; a relay-only node with neither
 /// a relay nor IP transports has no transport at all and cannot construct an
 /// endpoint. We assert the endpoint reports no connected relay home rather than
@@ -1347,7 +1199,13 @@ async fn laptop_with_empty_public_set_is_relay_disabled() -> anyhow::Result<()> 
     let home_relays: Vec<RelayAddr> = Vec::new();
 
     let allowlist = Arc::new(InMemoryAllowlist::new());
-    let (node, _inbound_rx) = SyncNode::new(common::seed(125), &home_relays, allowlist).await?;
+    let node = SyncNode::new_with_sync_handler(
+        common::seed(125),
+        &home_relays,
+        allowlist,
+        RejectSyncHandler,
+    )
+    .await?;
 
     // With RelayMode::Disabled there is no relay to home on. Give the endpoint a
     // brief window to (not) select a home, then assert no relay home is connected.
@@ -1395,7 +1253,13 @@ async fn startup_seeds_peer_lookup_from_allowlist_cross_public_set() -> anyhow::
     let peer_2 = PeerId::from_secret_bytes(common::seed(201));
 
     let allowlist = Arc::new(InMemoryAllowlist::new());
-    let (node, _inbound_rx) = SyncNode::new(common::seed(126), &[], allowlist.clone()).await?;
+    let node = SyncNode::new_with_sync_handler(
+        common::seed(126),
+        &[],
+        allowlist.clone(),
+        RejectSyncHandler,
+    )
+    .await?;
 
     // Add the node's OWN id to its allowlist (what the first-pair bootstrap does),
     // alongside the two real peers — so the self-skip is actually exercised.
@@ -1487,7 +1351,13 @@ async fn cross_product_for_server_is_peers_times_own_relay() -> anyhow::Result<(
     let peer_rhea = PeerId::from_secret_bytes(common::seed(211));
 
     let allowlist = Arc::new(InMemoryAllowlist::new());
-    let (node, _inbound_rx) = SyncNode::new(common::seed(127), &[], allowlist.clone()).await?;
+    let node = SyncNode::new_with_sync_handler(
+        common::seed(127),
+        &[],
+        allowlist.clone(),
+        RejectSyncHandler,
+    )
+    .await?;
 
     // The server is in its own allowlist (first-pair bootstrap) alongside the laptops.
     let own_peer_id = node.node_id();

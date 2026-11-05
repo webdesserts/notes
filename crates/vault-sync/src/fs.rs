@@ -424,7 +424,7 @@ impl FileSystem for InMemoryFs {
 /// required for all implementations (see module-level doc).
 ///
 /// The module is compiled unconditionally (no `cfg(test)`) so crates outside
-/// sync-core (e.g. sync-daemon) can import it without enabling a separate feature.
+/// vault-sync (e.g. sync-daemon) can import it without enabling a separate feature.
 /// It has no native-only dependencies and compiles for `wasm32`.
 pub mod conformance {
     use super::{FileSystem, FsError};

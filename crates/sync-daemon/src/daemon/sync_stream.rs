@@ -6,20 +6,19 @@
 //! exchange terminates when a side's `process_message` yields `reply: None`. The
 //! daemon must therefore PUMP a single QUIC bi-stream — feeding each reply back
 //! and reading the next — rather than the one-request / one-reply / half-close
-//! that sync-core's shared `connect_and_sync_raw` / `SyncStreamHandler` do.
+//! that the removed v1 `connect_and_sync_raw` / `SyncStreamHandler` path did.
 //!
 //! This module is the daemon's own pumped path for BOTH directions:
 //! - [`pump_outbound`] drives the exchange as the initiator (used by
 //!   `spawn_sync_exchange`).
 //! - [`PumpedSyncHandler`] is the inbound `ProtocolHandler`, registered on
-//!   `SYNC_ALPN` via [`sync_core::network::SyncNode::new_with_sync_handler`].
+//!   `SYNC_ALPN` via [`vault_sync::network::SyncNode::new_with_sync_handler`].
 //!
-//! **sync-core's `streams.rs` is deliberately left untouched** — sync-wasm rides
-//! the unchanged one-shot path. The framing here ([`write_frame`]/[`read_frame`])
-//! re-derives sync-core's `[u32 LE len][bytes]` format on purpose: duplicating
-//! ~20 trivial lines is the price of not modifying a shared transport seam two
-//! consumers depend on. The cap below MUST stay in lockstep with sync-core's
-//! `MAX_MESSAGE_BYTES`.
+//! The framing here ([`write_frame`]/[`read_frame`]) uses the same
+//! `[u32 LE len][bytes]` envelope as p2p-core's `streams` helpers, re-derived
+//! locally so the pump owns the stream lifetime (it keeps the stream open for the
+//! continuation). The cap below keeps the 64 MiB limit of the v1 transport this
+//! path replaced, so the wire format is unchanged.
 //!
 //! # Lock discipline (the load-bearing correctness rule)
 //!
@@ -36,17 +35,17 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
-use sync_core::PeerId;
-use sync_core::allowlist::AllowlistStorage;
-use sync_core::time_scale::scaled;
+use p2p_core::PeerId;
+use p2p_core::allowlist::AllowlistStorage;
+use p2p_core::time_scale::scaled;
 use vault_sync::Vault;
 use vault_sync::fs::FileSystem;
 
 /// Maximum byte length for a framed sync message.
 ///
-/// Mirrors sync-core's `streams::MAX_MESSAGE_BYTES` (64 MiB) — the daemon frames
-/// on its own pumped path (so it can keep the stream open for the continuation),
-/// but the wire format and cap must match the shared transport byte-for-byte.
+/// 64 MiB, the cap of the v1 one-shot transport this path replaced — the daemon
+/// frames on its own pumped path (so it can keep the stream open for the
+/// continuation), and keeps the wire format and cap unchanged.
 const MAX_MESSAGE_BYTES: u32 = 64 * 1024 * 1024;
 
 /// Hard cap on the number of legs a single pumped exchange may run.
@@ -75,9 +74,9 @@ fn idle_read_timeout() -> std::time::Duration {
 /// applied across the exchange (what the caller's success log + last-seen
 /// bookkeeping read).
 ///
-/// Replaces sync-core's `connect_and_sync_raw`, which finishes the send half
-/// after one write and reads exactly one reply — correct for sync-core's
-/// single-round-trip protocol, but it forecloses vault-sync's continuation.
+/// Replaces the removed v1 `connect_and_sync_raw`, which finished the send half
+/// after one write and read exactly one reply — correct for the v1
+/// single-round-trip protocol, but it foreclosed vault-sync's continuation.
 ///
 /// The caller (`spawn_sync_exchange`) dials the peer on `SYNC_ALPN` via
 /// `P2pNode::connect` / `DialHandle::connect` and hands the established
@@ -316,9 +315,8 @@ where
 
 /// Write a length-prefixed byte slice to the stream.
 ///
-/// Format: `[u32 little-endian length][bytes]`. Mirrors sync-core's
-/// `streams::write_length_prefixed` (which is `pub(crate)` to sync-core and so
-/// unreachable here) — see the module-level note on why this is duplicated.
+/// Format: `[u32 little-endian length][bytes]`, the same envelope as p2p-core's
+/// `streams` helpers — see the module-level note on why this is re-derived here.
 async fn write_frame(send: &mut SendStream, bytes: &[u8]) -> anyhow::Result<()> {
     let len = u32::try_from(bytes.len())
         .map_err(|_| anyhow::anyhow!("Message too large to frame: {} bytes", bytes.len()))?;

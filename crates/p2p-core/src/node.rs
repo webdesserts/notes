@@ -5,8 +5,8 @@
 //! methods for generic gossip topics and LAN mesh discovery.
 //!
 //! This is the application-agnostic networking node. The vault-sync protocol
-//! (`SYNC_ALPN`, the default `SyncStreamHandler`, and the `VaultId`-typed topic
-//! wrappers) lives in `sync-core`, which supplies the sync handler through the
+//! (`SYNC_ALPN`, `RejectSyncHandler`, and the `VaultId`-typed topic
+//! wrappers) lives in `vault_sync::network`, which supplies the sync handler through the
 //! seam constructors and wraps the generic topic helpers via `VaultGossipExt`.
 
 use anyhow::{Context, Result};
@@ -46,7 +46,7 @@ const MDNS_SERVICE_NAME: &str = "obsidian-sync";
 /// Derive a deterministic gossip [`TopicId`] from a `u64` seed.
 ///
 /// The seed's value is written into the first 8 bytes of a 32-byte little-endian
-/// array to produce a consistent `TopicId`. sync-core's `VaultGossipExt` derives
+/// array to produce a consistent `TopicId`. vault-sync's `VaultGossipExt` derives
 /// the seed from a `VaultId`, keeping the `VaultId` type out of p2p-core.
 pub fn topic_from_u64(seed: u64) -> TopicId {
     let mut bytes = [0u8; 32];
@@ -112,7 +112,7 @@ impl<A: AllowlistStorage + std::fmt::Debug + 'static> iroh::protocol::ProtocolHa
 /// Owns the QUIC endpoint, gossip instance, and protocol router.
 /// One `P2pNode` per daemon instance — not per vault.
 /// Vaults get per-topic gossip subscriptions via `join_topic()` (wrapped by
-/// sync-core's `VaultGossipExt::join_vault_gossip`).
+/// vault-sync's `VaultGossipExt::join_vault_gossip`).
 pub struct P2pNode {
     /// The underlying QUIC endpoint.
     ///
@@ -150,13 +150,13 @@ impl P2pNode {
     /// Create a `P2pNode` whose `sync_alpn` connections are dispatched to a
     /// caller-supplied `ProtocolHandler`.
     ///
-    /// This is the seam sync-core uses: it binds its `SYNC_ALPN` const and a
-    /// handler (the default one-shot `SyncStreamHandler`, or the daemon's pumped
-    /// multi-message handler) and forwards them here. p2p-core stays
+    /// This is the seam `vault_sync::network` uses: it binds its `SYNC_ALPN` const
+    /// and a handler (the daemon's pumped multi-message handler, or
+    /// `RejectSyncHandler` for pairing-only nodes) and forwards them here. p2p-core stays
     /// protocol-agnostic — it only routes the supplied ALPN to the supplied
     /// handler alongside the always-registered gossip and pairing ALPNs.
     ///
-    /// Named distinctly from sync-core's `SyncNodeSeam::new_with_sync_handler`
+    /// Named distinctly from vault-sync's `SyncNodeSeam::new_with_sync_handler`
     /// (which forwards `SYNC_ALPN` and omits the ALPN parameter) so the two don't
     /// collide on `SyncNode::` associated-function resolution — an inherent fn
     /// silently shadows a same-named trait fn at `Type::func` call sites.
@@ -510,7 +510,7 @@ impl P2pNode {
     ///
     /// Returns a generic byte-transport [`GossipSubscription`]: broadcast opaque
     /// payloads + a stream of generic membership/data events. p2p-core does NOT
-    /// interpret the payload bytes — the app owns its codec (sync-core wraps this
+    /// interpret the payload bytes — the app owns its codec (vault-sync wraps this
     /// in a `VaultGossip` that bincode-codecs its `GossipMessage` on top).
     ///
     /// At least one bootstrap node is needed to join an existing swarm.
@@ -548,7 +548,7 @@ impl P2pNode {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
         // The pump: translate iroh-gossip's events into generic `GossipEvent`s.
-        // Descended verbatim from sync-core's former `VaultGossip::new` loop, with
+        // Descended verbatim from the legacy sync crate's `VaultGossip::new` loop, with
         // the ONE change at `Event::Received` — the payload is forwarded OPAQUE
         // (`bytes: msg.content`) rather than decoded. The app decodes downstream.
         let task = AbortOnDropHandle::new(n0_future::task::spawn(async move {
@@ -576,7 +576,7 @@ impl P2pNode {
                     Event::Received(msg) => {
                         // Forward the payload OPAQUE — no decode. iroh-gossip's
                         // `msg.content` is the exact bytes a peer broadcast; the app
-                        // (sync-core's codec wrapper) deserializes downstream.
+                        // (vault-sync's codec wrapper) deserializes downstream.
                         GossipEvent::Data {
                             from: endpoint_to_peer(msg.delivered_from),
                             bytes: msg.content,
@@ -781,7 +781,7 @@ impl P2pNode {
 /// the raw iroh handles, but the integration tests need them for harness plumbing
 /// (seed a `MemoryLookup`, await `endpoint.online()`, inspect relay status). The
 /// `feature = "test-util"` half exposes the accessors to the cross-crate
-/// integration tests (which build sync-core / sync-daemon WITHOUT `#[cfg(test)]`);
+/// integration tests (which build vault-sync / sync-daemon WITHOUT `#[cfg(test)]`);
 /// the `test` half covers p2p-core's own in-crate tests.
 #[cfg(any(test, feature = "test-util"))]
 impl P2pNode {
@@ -860,7 +860,7 @@ mod tests {
     use super::*;
 
     /// `topic_from_u64` and `u64_from_topic` must be exact inverses so a caller
-    /// (sync-core's `VaultGossipExt`) can recover the seed encoded in a topic.
+    /// (vault-sync's `VaultGossipExt`) can recover the seed encoded in a topic.
     #[test]
     fn topic_from_u64_round_trips_through_u64_from_topic() {
         // Cover edge values: small seeds that zero-pad the high bytes, a full-width

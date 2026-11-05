@@ -1,62 +1,43 @@
-//! sync-core's seam onto p2p-core's [`P2pNode`].
+//! vault-sync's seam onto p2p-core's [`P2pNode`].
 //!
 //! The node itself is generic (`p2p_core::P2pNode`) — it registers a
 //! caller-supplied ALPN + handler and exposes `u64`-keyed gossip topics. This
 //! module binds the vault-sync specifics back onto it:
 //!
-//! - [`SyncNodeSeam`] supplies the `SYNC_ALPN` const and the default one-shot
-//!   [`SyncStreamHandler`] for the convenience constructors, while still
-//!   forwarding caller-supplied handlers for the daemon's pumped path.
-//! - [`VaultGossipExt`] maps the `VaultId` type (sync-core's) onto p2p-core's
-//!   generic `u64` topic helpers, keeping `VaultId` out of p2p-core.
+//! - [`SyncNodeSeam`] binds the `SYNC_ALPN` const to a caller-supplied sync
+//!   stream handler (the daemon's `PumpedSyncHandler`, or
+//!   [`RejectSyncHandler`](crate::network::RejectSyncHandler) for nodes that
+//!   serve no sync).
+//! - [`VaultGossipExt`] maps vault-sync's `VaultId` onto p2p-core's generic
+//!   `u64` topic helpers, keeping `VaultId` out of p2p-core.
 //!
-//! Both are extension traits on `P2pNode` so the existing `SyncNode::new(...)`
-//! and `node.join_vault_gossip(...)` call shapes resolve unchanged (callers add
-//! a `use sync_core::network::{SyncNodeSeam, VaultGossipExt};`).
+//! Both are extension traits on `P2pNode`, so callers write
+//! `SyncNode::new_with_sync_handler(...)` and `node.join_vault_gossip(...)`
+//! after `use vault_sync::network::{SyncNodeSeam, VaultGossipExt};`.
 
 use std::sync::Arc;
 
 use anyhow::Result;
 use p2p_core::{AllowlistStorage, P2pNode, PeerId, RelayAddr, Topic};
 
+use crate::VaultId;
 use crate::network::SYNC_ALPN;
 use crate::network::gossip::VaultGossip;
-use crate::network::streams::{InboundSyncRx, SyncStreamHandler};
-use crate::peer_id::VaultId;
 
 /// Vault-sync constructors layered onto the generic [`P2pNode`].
 ///
-/// The default-handler constructors ([`new`](SyncNodeSeam::new),
-/// [`new_relay_only`](SyncNodeSeam::new_relay_only)) bind the one-shot
-/// [`SyncStreamHandler`] and return its [`InboundSyncRx`] alongside the node —
-/// the handler's inbound channel lives in sync-core, so it cannot be a `P2pNode`
-/// field without inverting the dependency (the p2p-core → sync-core cycle).
-/// Callers drive the returned receiver to process inbound sync requests.
-///
-/// The pumped constructors forward a caller-supplied handler (the daemon's
-/// `PumpedSyncHandler`, which owns its own inbound channel) and return just the
-/// node.
+/// Every constructor takes a caller-supplied `SYNC_ALPN` handler: the daemon's
+/// `PumpedSyncHandler` (which owns its own inbound channel) for real sync, or
+/// [`RejectSyncHandler`](crate::network::RejectSyncHandler) for nodes that only
+/// need the endpoint (pairing, relay-routing tests).
 #[allow(async_fn_in_trait)]
 pub trait SyncNodeSeam: Sized {
-    /// Create a node with the default one-shot sync handler.
+    /// Create a node whose `SYNC_ALPN` connections are dispatched to
+    /// `sync_handler`.
     ///
-    /// Returns the node and the inbound-sync receiver. Drive the receiver in a
-    /// task to process incoming sync requests from other nodes.
-    async fn new<A: AllowlistStorage + std::fmt::Debug + 'static>(
-        secret_key_bytes: [u8; 32],
-        relays: &[RelayAddr],
-        allowlist: Arc<A>,
-    ) -> Result<(Self, InboundSyncRx)>;
-
-    /// Create a node whose `SYNC_ALPN` connections are dispatched to a
-    /// caller-supplied handler instead of the default one-shot one.
-    ///
-    /// This is the seam the daemon uses to run its multi-message *pumped*
-    /// handshake: the daemon supplies a handler that drives the variable-length
+    /// The daemon supplies a handler that drives the variable-length
     /// vault-sync exchange (digest → mismatch → exchange → response) inline over
-    /// one bi-stream, rather than the one-message-in / one-reply-out the default
-    /// handler does. The pumped handler owns its own inbound channel, so no
-    /// receiver is returned.
+    /// one bi-stream.
     async fn new_with_sync_handler<A, H>(
         secret_key_bytes: [u8; 32],
         relays: &[RelayAddr],
@@ -67,19 +48,10 @@ pub trait SyncNodeSeam: Sized {
         A: AllowlistStorage + std::fmt::Debug + 'static,
         H: p2p_core::ProtocolHandler;
 
-    /// Relay-only [`new`](SyncNodeSeam::new) — the endpoint has no IP transports,
-    /// so the relay is the sole route. Test-only (behind `test-util`).
-    #[cfg(feature = "test-util")]
-    async fn new_relay_only<A: AllowlistStorage + std::fmt::Debug + 'static>(
-        secret_key_bytes: [u8; 32],
-        relays: &[RelayAddr],
-        allowlist: Arc<A>,
-    ) -> Result<(Self, InboundSyncRx)>;
-
     /// Relay-only [`new_with_sync_handler`](SyncNodeSeam::new_with_sync_handler) —
-    /// the off-LAN/NAT counterpart with a caller-supplied handler. The daemon's
-    /// relay-path convergence tests need BOTH the relay-only topology AND the
-    /// pumped handler. Test-only (behind `test-util`).
+    /// the endpoint has no IP transports, so the relay is the sole route. The
+    /// daemon's relay-path tests need the relay-only topology with a real (or
+    /// rejecting) handler. Test-only (behind `test-util`).
     #[cfg(feature = "test-util")]
     async fn new_relay_only_with_sync_handler<A, H>(
         secret_key_bytes: [u8; 32],
@@ -93,21 +65,6 @@ pub trait SyncNodeSeam: Sized {
 }
 
 impl SyncNodeSeam for P2pNode {
-    async fn new<A: AllowlistStorage + std::fmt::Debug + 'static>(
-        secret_key_bytes: [u8; 32],
-        relays: &[RelayAddr],
-        allowlist: Arc<A>,
-    ) -> Result<(Self, InboundSyncRx)> {
-        // The default `SyncStreamHandler` is the one-shot inbound path (one
-        // message in, one reply out over a oneshot). The returned receiver
-        // carries those requests to the caller for processing.
-        let (sync_handler, inbound_sync_rx) = SyncStreamHandler::new();
-        let node =
-            P2pNode::with_sync_alpn(secret_key_bytes, relays, allowlist, SYNC_ALPN, sync_handler)
-                .await?;
-        Ok((node, inbound_sync_rx))
-    }
-
     async fn new_with_sync_handler<A, H>(
         secret_key_bytes: [u8; 32],
         relays: &[RelayAddr],
@@ -119,24 +76,6 @@ impl SyncNodeSeam for P2pNode {
         H: p2p_core::ProtocolHandler,
     {
         P2pNode::with_sync_alpn(secret_key_bytes, relays, allowlist, SYNC_ALPN, sync_handler).await
-    }
-
-    #[cfg(feature = "test-util")]
-    async fn new_relay_only<A: AllowlistStorage + std::fmt::Debug + 'static>(
-        secret_key_bytes: [u8; 32],
-        relays: &[RelayAddr],
-        allowlist: Arc<A>,
-    ) -> Result<(Self, InboundSyncRx)> {
-        let (sync_handler, inbound_sync_rx) = SyncStreamHandler::new();
-        let node = P2pNode::relay_only_with_sync_alpn(
-            secret_key_bytes,
-            relays,
-            allowlist,
-            SYNC_ALPN,
-            sync_handler,
-        )
-        .await?;
-        Ok((node, inbound_sync_rx))
     }
 
     #[cfg(feature = "test-util")]

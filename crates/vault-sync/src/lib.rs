@@ -22,6 +22,8 @@ pub mod fs;
 pub mod hash;
 pub mod index;
 pub mod markdown;
+#[cfg(feature = "network")]
+pub mod network;
 pub mod protocol;
 pub mod vault;
 

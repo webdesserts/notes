@@ -15,10 +15,10 @@ mod daemon_sync {
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
 
-    use sync_core::network::VaultGossipExt;
-    use sync_core::peer_id::{PeerId, VaultId};
+    use p2p_core::PeerId;
     use vault_sync::SyncMetadata;
     use vault_sync::fs::FileSystem;
+    use vault_sync::network::VaultGossipExt;
 
     use sync_daemon::daemon::Daemon;
     use sync_daemon::watcher::FileEvent;
@@ -331,11 +331,11 @@ mod daemon_sync {
         let a_node_endpoint = node_a.sync_node.node_id();
         let gossip_a = node_a
             .sync_node
-            .join_vault_gossip(&VaultId::from(a_vault_id.as_u64()), vec![])
+            .join_vault_gossip(&a_vault_id, vec![])
             .await?;
         let gossip_b = node_b
             .sync_node
-            .join_vault_gossip(&VaultId::from(b_vault_id.as_u64()), vec![])
+            .join_vault_gossip(&b_vault_id, vec![])
             .await?;
 
         let daemon_a = spawn_daemon(node_a, gossip_a);
@@ -360,11 +360,11 @@ mod daemon_sync {
         );
 
         // Adopt A's VaultId and re-join its gossip topic, bootstrapping off A.
-        // `adopt_and_rejoin` speaks the iroh layer's `sync_core::VaultId`; bridge
+        // `adopt_and_rejoin` speaks the iroh layer's `vault_sync::VaultId`; bridge
         // A's vault-sync VaultId through `u64`.
         daemon_b
             .adopt_and_rejoin(
-                VaultId::from(a_vault_id.as_u64()),
+                a_vault_id,
                 vec![PeerId::from_bytes(*a_node_endpoint.as_bytes())],
             )
             .await?;

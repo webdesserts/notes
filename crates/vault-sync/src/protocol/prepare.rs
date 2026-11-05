@@ -2,7 +2,7 @@
 //! exchange/response builders that compute what a peer is missing, and the
 //! real-time push primitives.
 //!
-//! Carried from `sync-core`'s `sync_engine/prepare.rs`, re-keyed on [`DocId`]
+//! Carried from the legacy sync crate's `sync_engine/prepare.rs`, re-keyed on [`DocId`]
 //! (UUID) instead of path. The headline carry is the send-side node-durability
 //! coupling (S5/C3): when a response ships any brand-new document snapshot, it also
 //! ships the FULL Index snapshot so the node lands with the doc — the send half of

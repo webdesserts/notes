@@ -3,7 +3,7 @@
 //! A [`GossipSubscription`] is the app-agnostic transport for one gossip topic:
 //! it broadcasts opaque payloads and yields a stream of generic membership/data
 //! events ([`GossipEvent`]). p2p-core does NOT interpret the payload bytes — the
-//! app owns its codec. sync-core layers its `GossipMessage` bincode codec on top
+//! app owns its codec. vault-sync layers its `GossipMessage` bincode codec on top
 //! via a thin wrapper (`VaultGossip`).
 //!
 //! ## The pump
@@ -30,7 +30,7 @@ use crate::peer_id::PeerId;
 /// A gossip topic identifier.
 ///
 /// Opaque value type wrapping iroh-gossip's `TopicId`. Derived from a `u64` seed
-/// (sync-core derives the seed from a `VaultId`, keeping the `VaultId` type out of
+/// (vault-sync derives the seed from a `VaultId`, keeping the `VaultId` type out of
 /// p2p-core). [`as_bytes`](Topic::as_bytes) exposes the raw 32 bytes — a wire
 /// field for pairing (`PairingApproval.vault_topic`), so the bytes must stay
 /// byte-identical.
@@ -199,7 +199,7 @@ impl GossipHandle {
 
     /// Broadcast an opaque payload — see [`GossipSubscription::broadcast`].
     ///
-    /// Pure pass-through to iroh-gossip; no envelope added. sync-core's codec
+    /// Pure pass-through to iroh-gossip; no envelope added. vault-sync's codec
     /// wrapper broadcasts through this handle so it does not need to hold the whole
     /// (non-`Clone`) subscription.
     pub async fn broadcast(&self, payload: Bytes) -> Result<()> {
@@ -224,7 +224,7 @@ mod tests {
     use super::*;
 
     /// `Topic::from_u64` and `Topic::to_u64` must be exact inverses so a caller
-    /// (sync-core's `VaultGossipExt`) can recover the seed encoded in a topic.
+    /// (vault-sync's `VaultGossipExt`) can recover the seed encoded in a topic.
     /// Mirrors the edge values `node_seam.rs`'s round-trip test uses.
     #[test]
     fn topic_round_trips_through_u64() {

@@ -15,11 +15,11 @@ mod daemon_inbound_freshness {
     use p2p_core::MemoryLookup;
     use tokio::sync::{Mutex, mpsc};
 
-    use sync_core::allowlist::{AllowlistStorage, InMemoryAllowlist};
-    use sync_core::network::{SyncNode, SyncNodeSeam};
-    use sync_core::peer_id::PeerId;
+    use p2p_core::PeerId;
+    use p2p_core::allowlist::{AllowlistStorage, InMemoryAllowlist};
     use vault_sync::Vault;
     use vault_sync::fs::InMemoryFs;
+    use vault_sync::network::{SyncNode, SyncNodeSeam};
 
     use super::common::build_node;
 
@@ -81,7 +81,7 @@ mod daemon_inbound_freshness {
             .add(lookup);
 
         // Open the handshake: connect on `SYNC_ALPN` and write the framed opener. The
-        // wire format is sync-core's `[u32 LE len][bytes]` (re-derived here, as the
+        // wire format is the `[u32 LE len][bytes]` envelope (re-derived here, as the
         // daemon's own `write_frame` does — see `sync_stream.rs`).
         let opener = initiator.vault.lock().await.prepare_request().await?;
         // Dial through `P2pNode::connect` (the public Tier-1 method); the bare
@@ -90,7 +90,7 @@ mod daemon_inbound_freshness {
             .sync_node
             .connect(
                 &p2p_core::PeerAddr::new(responder.node_id()),
-                sync_core::network::SYNC_ALPN,
+                vault_sync::network::SYNC_ALPN,
             )
             .await?;
         let (mut send, _recv) = connection.open_bi().await?;

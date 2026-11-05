@@ -42,16 +42,17 @@ use tokio::sync::{broadcast, mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-use sync_core::allowlist::{AllowedPeer, AllowlistStorage};
-use sync_core::network::{
+use p2p_core::PeerId;
+use p2p_core::allowlist::{AllowedPeer, AllowlistStorage};
+use p2p_core::pairing::{PairingChallenge, PairingSession};
+use p2p_core::pairing_handler::{InboundPairingExchange, PairingApproval, PairingEvent};
+use p2p_core::time_scale::{scaled, scaled_ms};
+use vault_sync::network::peers::{ConnectTransition, PeerRegistry};
+use vault_sync::network::{
     GOSSIP_ALPN, SyncNode,
     gossip::{GossipEvent, GossipMessage, MAX_GOSSIP_MESSAGE_SIZE, VaultGossip},
-    pairing::{InboundPairingExchange, PairingApproval, PairingEvent},
 };
-use sync_core::pairing::{PairingChallenge, PairingSession};
-use sync_core::time_scale::{scaled, scaled_ms};
-use sync_core::{ConnectTransition, PeerId, PeerRegistry};
-// The vault/sync-engine layer is vault-sync; the iroh half stays on sync-core.
+// The vault/sync-engine layer and its iroh seam (`vault_sync::network`) are vault-sync.
 // `Daemon<FS>` and `Vault<FS>` are both generic over vault-sync's `FileSystem`.
 use uuid::Uuid;
 use vault_sync::Vault;
@@ -318,7 +319,7 @@ pub struct Daemon<FS: FileSystem, AL> {
     /// push synthetic events without a real OS filesystem watcher.
     file_event_rx: mpsc::UnboundedReceiver<FileEvent>,
     /// Optional mDNS discovery channel. `None` in tests (and on WASM builds).
-    discovery_rx: Option<mpsc::Receiver<sync_core::network::discovery::DiscoveredMesh>>,
+    discovery_rx: Option<mpsc::Receiver<p2p_core::discovery::DiscoveredMesh>>,
     /// Network-change signal. Each `()` means iroh observed an `EndpointAddr`
     /// change (relay/direct-address delta ⇒ network conditions changed). Drained
     /// in the run_loop select; the handler resets every hint's backoff so the
@@ -476,7 +477,7 @@ impl<FS: FileSystem + 'static, AL: AllowlistStorage + 'static> Daemon<FS, AL> {
         sync_node: SyncNode,
         vault_gossip: VaultGossip,
         file_event_rx: mpsc::UnboundedReceiver<FileEvent>,
-        discovery_rx: Option<mpsc::Receiver<sync_core::network::discovery::DiscoveredMesh>>,
+        discovery_rx: Option<mpsc::Receiver<p2p_core::discovery::DiscoveredMesh>>,
         allowlist: Arc<AL>,
         device_name: String,
         relay_url: Option<String>,
@@ -2379,7 +2380,7 @@ impl<FS: FileSystem + 'static, AL: AllowlistStorage + 'static> Daemon<FS, AL> {
             mesh_members,
         };
 
-        // Pairing sessions expire after 5 minutes, matching PAIRING_TIMEOUT_SECS in sync-core.
+        // Pairing sessions expire after 5 minutes, matching PAIRING_TIMEOUT_SECS in p2p-core's pairing module.
         let expires_at_ms = now_ms() + (5 * 60 * 1000);
 
         self.active_pairing = Some(session);
@@ -2478,7 +2479,7 @@ mod connect_log_tests {
         conn_type_label, fmt_peer_connect_line, fmt_peer_disconnect_line, resolve_peer_name_from,
     };
     use p2p_core::{PLACEHOLDER_DEVICE_NAME, PeerConnType};
-    use sync_core::{PeerId, allowlist::AllowedPeer};
+    use p2p_core::{PeerId, allowlist::AllowedPeer};
 
     fn lan(ip_port: &str) -> PeerConnType {
         PeerConnType::Lan {

@@ -2,7 +2,7 @@
 //! which paths the Index vacated on this device (deletes and moves), and clean up
 //! the filesystem for them.
 //!
-//! Carried from `sync-core`'s `sync_engine/registry_apply.rs`. Two structural
+//! Carried from the legacy sync crate's `sync_engine/registry_apply.rs`. Two structural
 //! departures the UUID model forces:
 //!
 //! - **The twin-dedupe machinery is gone.** It guarded a path-hash collision class

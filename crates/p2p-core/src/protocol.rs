@@ -8,8 +8,8 @@
 //! wraps the EXTENSION POINT, not the raw byte-I/O.
 
 // Tier-2 re-exports: the raw QUIC byte-I/O handles. These stay iroh's types,
-// surfaced through p2p-core so consumers (sync-core `streams.rs`, the daemon's
-// `sync_stream.rs`) name them via `p2p_core` and keep `iroh` out of their
+// surfaced through p2p-core so consumers (the daemon's `sync_stream.rs`,
+// vault-sync's `RejectSyncHandler`) name them via `p2p_core` and keep `iroh` out of their
 // manifests. `ReadExactError` is included because `read_frame` matches it by
 // variant, so the daemon must name the type. p2p-core wraps the EXTENSION POINT
 // (the handler trait, `connect`), not the byte-I/O — swappable for a real wrapper

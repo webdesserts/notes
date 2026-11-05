@@ -7895,31 +7895,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sync-core"
-version = "0.5.3"
-dependencies = [
- "anyhow",
- "async-trait",
- "bincode",
- "bytes",
- "ed25519-dalek 2.2.0",
- "getrandom 0.2.17",
- "n0-future",
- "p2p-core",
- "rand 0.9.2",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "toml 0.8.23",
- "tracing",
- "uuid",
- "web-time",
-]
-
-[[package]]
 name = "sync-daemon"
 version = "0.5.3"
 dependencies = [
@@ -7938,7 +7913,6 @@ dependencies = [
  "reqwest 0.13.2",
  "serde",
  "serde_json",
- "sync-core",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -9227,10 +9201,14 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 name = "vault-sync"
 version = "0.5.3"
 dependencies = [
+ "anyhow",
  "async-trait",
  "bincode",
  "blake3",
+ "bytes",
  "loro",
+ "n0-future",
+ "p2p-core",
  "rand 0.9.2",
  "serde",
  "serde_json",

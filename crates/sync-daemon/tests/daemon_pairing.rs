@@ -16,10 +16,10 @@ mod daemon_pairing {
 
     use tokio_util::sync::CancellationToken;
 
-    use sync_core::allowlist::AllowlistStorage;
-    use sync_core::network::VaultGossipExt;
-    use sync_core::peer_id::{PeerId, VaultId};
+    use p2p_core::PeerId;
+    use p2p_core::allowlist::AllowlistStorage;
     use vault_sync::fs::FileSystem;
+    use vault_sync::network::VaultGossipExt;
 
     use sync_daemon::watcher::FileEvent;
 
@@ -342,11 +342,11 @@ mod daemon_pairing {
         let a_endpoint_id = node_a.sync_node.node_id();
         let gossip_a = node_a
             .sync_node
-            .join_vault_gossip(&VaultId::from(a_vault_id.as_u64()), vec![])
+            .join_vault_gossip(&a_vault_id, vec![])
             .await?;
         let gossip_b = node_b
             .sync_node
-            .join_vault_gossip(&VaultId::from(b_vault_id.as_u64()), vec![])
+            .join_vault_gossip(&b_vault_id, vec![])
             .await?;
 
         // Build daemon A (responder) with DaemonControl so we can intercept
@@ -656,11 +656,11 @@ mod daemon_pairing {
 
         let gossip_a = node_a
             .sync_node
-            .join_vault_gossip(&VaultId::from(a_vault_id.as_u64()), vec![])
+            .join_vault_gossip(&a_vault_id, vec![])
             .await?;
         let gossip_b = node_b
             .sync_node
-            .join_vault_gossip(&VaultId::from(b_vault_id.as_u64()), vec![])
+            .join_vault_gossip(&b_vault_id, vec![])
             .await?;
 
         // Build daemon A (responder) — pass A's relay URL so `PairingResult.relay_urls`

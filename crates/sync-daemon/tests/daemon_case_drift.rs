@@ -14,10 +14,10 @@ mod daemon_case_drift {
     use tokio::sync::{Mutex, mpsc};
     use tokio_util::sync::CancellationToken;
 
-    use sync_core::allowlist::InMemoryAllowlist;
-    use sync_core::network::VaultGossipExt;
+    use p2p_core::allowlist::InMemoryAllowlist;
     use vault_sync::Vault;
     use vault_sync::fs::{FileSystem, InMemoryFs};
+    use vault_sync::network::VaultGossipExt;
 
     use sync_daemon::daemon::Daemon;
     use sync_daemon::watcher::FileEvent;

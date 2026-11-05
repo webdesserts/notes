@@ -1,7 +1,7 @@
 //! Apply inbound document updates: merge an existing document or materialize a new
 //! one, keyed by UUID.
 //!
-//! Carried from `sync-core`'s `sync_engine/document_apply.rs`, with the headline
+//! Carried from the legacy sync crate's `sync_engine/document_apply.rs`, with the headline
 //! simplification the UUID model buys: the entire "silent latest-wins divergence"
 //! branch is GONE. The old code keyed updates by path, so two replicas that
 //! independently created different documents at the same path would collide; it

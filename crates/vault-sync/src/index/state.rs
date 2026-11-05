@@ -5,7 +5,7 @@
 //! `index/mod.rs` re-exports everything here so both the crate's public surface
 //! and the crate-internal `crate::index::IndexError` paths resolve.
 //!
-//! Carried from `sync-core`'s `vault/state.rs`. Two deliberate departures from the
+//! Carried from the legacy sync crate's `vault/state.rs`. Two deliberate departures from the
 //! port:
 //! - The twin-dedupe read models are gone — UUID identity dissolves the path-hash
 //!   collision class they guarded, so the dedupe subsystem does not exist in this
@@ -31,7 +31,7 @@ pub(crate) const METADATA_FILE: &str = ".sync/metadata.toml";
 ///
 /// Bump this when any breaking change is made to the file layout, the Loro
 /// schema, or naming. This is a greenfield format (the `vault-sync` rewrite is
-/// not wire-compatible with the old `sync-core` `.sync/` directory), so it starts
+/// not wire-compatible with the legacy sync crate's `.sync/` directory), so it starts
 /// fresh at version 1.
 pub(crate) const CURRENT_SYNC_VERSION: u32 = 1;
 
@@ -486,6 +486,43 @@ mod tests {
     fn vault_id_display_is_zero_padded_hex() {
         let id = VaultId::from(0xff_u64);
         assert_eq!(id.to_string(), "00000000000000ff");
+    }
+
+    #[test]
+    fn vault_id_generate_is_never_zero() {
+        for _ in 0..1000 {
+            assert_ne!(VaultId::generate().as_u64(), 0);
+        }
+    }
+
+    #[test]
+    fn vault_id_display_is_lower_hex() {
+        let id = VaultId(0xa1b2c3d4e5f67890);
+        assert_eq!(id.to_string(), "a1b2c3d4e5f67890");
+    }
+
+    #[test]
+    fn vault_id_parses_hex() {
+        let id: VaultId = "a1b2c3d4e5f67890".parse().unwrap();
+        assert_eq!(id.as_u64(), 0xa1b2c3d4e5f67890);
+    }
+
+    #[test]
+    fn vault_id_rejects_uuid() {
+        // VaultId has no legacy UUID support.
+        assert!(
+            "550e8400-e29b-41d4-a716-446655440000"
+                .parse::<VaultId>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn vault_id_serde_round_trips() {
+        let original = VaultId::generate();
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: VaultId = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
     }
 
     #[test]

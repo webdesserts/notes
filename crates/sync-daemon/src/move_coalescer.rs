@@ -38,8 +38,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
+use p2p_core::time_scale::scaled;
 use serde::{Deserialize, Serialize};
-use sync_core::time_scale::scaled;
 use uuid::Uuid;
 
 /// How long a not-yet-tracked create/delete waits for its partner before it

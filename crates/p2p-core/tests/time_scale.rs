@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use sync_core::time_scale::{scaled, set_time_scale, time_scale};
+use p2p_core::time_scale::{scaled, set_time_scale, time_scale};
 
 /// At scale 0.1 a 30s base duration read through the *global* `scaled` collapses
 /// to ~3s. The inline unit tests only exercise the pure `_with` helpers with an

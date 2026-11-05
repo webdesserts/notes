@@ -20,11 +20,11 @@ mod daemon_move_recovery {
     use tokio::sync::{Mutex, mpsc};
     use tokio_util::sync::CancellationToken;
 
-    use sync_core::allowlist::InMemoryAllowlist;
-    use sync_core::network::{SyncNode, SyncNodeSeam, VaultGossipExt};
-    use sync_core::peer_id::PeerId;
+    use p2p_core::PeerId;
+    use p2p_core::allowlist::InMemoryAllowlist;
     use uuid::Uuid;
     use vault_sync::fs::{FileSystem, InMemoryFs};
+    use vault_sync::network::{SyncNode, SyncNodeSeam, VaultGossipExt};
     use vault_sync::{ContentDoc, Vault, content_hash};
 
     use sync_daemon::daemon::Daemon;

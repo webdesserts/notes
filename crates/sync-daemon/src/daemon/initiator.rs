@@ -11,16 +11,17 @@ use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
+use p2p_core::allowlist::AllowlistStorage;
+use p2p_core::discovery::MeshMetadata;
+use p2p_core::pairing_handler::pair_with_mesh_interactive;
 use p2p_core::{DialHandle, PeerAddr, RelayAddr};
-use sync_core::allowlist::AllowlistStorage;
-use sync_core::network::VaultGossipExt;
-use sync_core::network::discovery::MeshMetadata;
-use sync_core::network::pairing::pair_with_mesh_interactive;
+use vault_sync::network::VaultGossipExt;
 // `VaultId` here is the mesh's id recovered from the gossip topic (a
-// `sync_core::VaultId`), used by the iroh layer. It is bridged to a
+// `vault_sync::VaultId`), used by the iroh layer. It is bridged to a
 // `vault_sync::VaultId` only at the `vault.adopt_vault_id` boundary below.
-use sync_core::pairing::PairingHello;
-use sync_core::{PeerId, VaultId};
+use p2p_core::PeerId;
+use p2p_core::pairing::PairingHello;
+use vault_sync::VaultId;
 use vault_sync::fs::FileSystem;
 
 use super::Daemon;
@@ -37,7 +38,7 @@ pub(super) const INITIATOR_DISCOVERY_TIMEOUT_SECS: u64 = 10;
 /// directly from the spawned task and never reach here, so the event loop only
 /// ever sees outcomes that warrant adoption work.
 pub(super) struct InitiatorPairOutcome {
-    pub(super) result: sync_core::pairing::PairingResult,
+    pub(super) result: p2p_core::pairing::PairingResult,
     pub(super) responder_device_name: String,
     /// The transport-verified `PeerId` of the responder — the QUIC connection
     /// target the initiator dialed. Used to key the persisted relay hint so we
@@ -109,7 +110,7 @@ impl<FS: FileSystem + 'static, AL: AllowlistStorage + 'static> Daemon<FS, AL> {
     /// `pair://discovery-finished` event to the window.
     pub(super) async fn start_initiator_discovery(
         &mut self,
-        reply: mpsc::UnboundedSender<sync_core::network::discovery::DiscoveredMesh>,
+        reply: mpsc::UnboundedSender<p2p_core::discovery::DiscoveredMesh>,
     ) {
         // Replace any prior session, cancelling its in-flight tasks.
         if let Some(prev) = self.active_initiator.take() {
@@ -134,9 +135,9 @@ impl<FS: FileSystem + 'static, AL: AllowlistStorage + 'static> Daemon<FS, AL> {
 
         tokio::spawn(async move {
             use futures::StreamExt;
-            use sync_core::network::discovery::mesh_from_discovery_event;
+            use p2p_core::discovery::mesh_from_discovery_event;
 
-            let deadline = tokio::time::sleep(sync_core::time_scale::scaled(
+            let deadline = tokio::time::sleep(p2p_core::time_scale::scaled(
                 std::time::Duration::from_secs(INITIATOR_DISCOVERY_TIMEOUT_SECS),
             ));
             futures::pin_mut!(stream);
@@ -454,14 +455,9 @@ impl<FS: FileSystem + 'static, AL: AllowlistStorage + 'static> Daemon<FS, AL> {
         new_vault_id: VaultId,
         mesh_members: Vec<PeerId>,
     ) -> Result<()> {
-        // 1. Adopt the VaultId (metadata.toml + in-memory). `new_vault_id` is a
-        //    `sync_core::VaultId` (recovered from the gossip topic); bridge it through
-        //    `u64` to the `vault_sync::VaultId` the vault index speaks.
-        self.vault
-            .lock()
-            .await
-            .adopt_vault_id(vault_sync::VaultId::from(new_vault_id.as_u64()))
-            .await?;
+        // 1. Adopt the VaultId (metadata.toml + in-memory), recovered from the
+        //    gossip topic.
+        self.vault.lock().await.adopt_vault_id(new_vault_id).await?;
 
         // 2. Bootstrap gossip off the mesh members (same validate-and-keep as
         //    startup): skip a non-curve-point id gracefully, keep the `PeerId`.
@@ -531,7 +527,7 @@ async fn run_initiator_pairing_parked(
     device_name: &str,
     connect_reply: oneshot::Sender<Result<String, String>>,
     code_rx: oneshot::Receiver<String>,
-) -> Option<(sync_core::pairing::PairingResult, String)> {
+) -> Option<(p2p_core::pairing::PairingResult, String)> {
     let self_peer_id = PeerId::from_bytes(self_node_id_bytes);
     let hello = PairingHello {
         node_id: self_peer_id,

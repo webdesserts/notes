@@ -2,7 +2,7 @@
 //! and delete file nodes, the lookups that back them, and the cache rebuild and
 //! path validation they rely on.
 //!
-//! Carried from `sync-core`'s `vault/registry_tree.rs` as an `impl Index` block.
+//! Carried from the legacy sync crate's `vault/registry_tree.rs` as an `impl Index` block.
 //! Every operation here is an in-memory CRDT mutation — there is no filesystem
 //! coupling. Three deliberate departures from the port:
 //! - **UUID identity:** a file node carries a `uuid` meta (the document's minted

@@ -100,7 +100,7 @@ mod platform {
     /// Thread-safe for use in multi-threaded Tokio runtime.
     /// Wrap in `Arc` to enable subscriptions.
     pub struct EventBus {
-        // Carried verbatim from sync-core; the nested handler generic is acceptable here.
+        // Carried verbatim from the legacy sync crate; the nested handler generic is acceptable here.
         #[allow(clippy::type_complexity)]
         callbacks: RwLock<Vec<(usize, Arc<dyn Fn(SyncEvent) + Send + Sync>)>>,
         next_id: AtomicUsize,

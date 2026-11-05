@@ -4,7 +4,7 @@ The native peer-to-peer networking substrate wrapping [iroh] — peer identity, 
 mDNS discovery, gossip, an embedded relay, and the node that ties them together.
 
 p2p-core owns the **application-agnostic** half of the mesh: everything that isn't a
-specific app's wire protocol. A host crate (today, `sync-core`) depends on p2p-core and
+specific app's wire protocol. A host crate (today, `vault-sync`) depends on p2p-core and
 layers its own protocol on top via the ALPN seam (below). It was extracted from
 obsidian-memory's sync daemon across a six-increment refactor so the iroh bootstrap can
 be reused by other webdesserts p2p apps.
@@ -14,7 +14,7 @@ gate. It simply *is* the native networking crate.
 
 ## Architecture
 
-**Acyclic dependency inversion.** The rule is one-directional: `sync-core → p2p-core`,
+**Acyclic dependency inversion.** The rule is one-directional: `vault-sync → p2p-core`,
 never the reverse. p2p-core's `Cargo.toml` must never name a consumer crate. It speaks in
 generic primitives (`u64` topic ids, `PeerId`, `TopicId`) and lets the host map its own
 identities onto them (e.g. `topic_from_u64` / `u64_from_topic`).
@@ -24,7 +24,7 @@ identities onto them (e.g. `topic_from_u64` / `u64_from_topic`).
 ALPN + `ProtocolHandler`** — that handler is the seam. The host app hands p2p-core its
 protocol's ALPN and handler at construction; p2p-core wires it into the router alongside
 gossip and pairing. The host never re-implements the node; it layers on via extension
-traits (see `sync-core`'s `SyncNodeSeam` / `VaultGossipExt`).
+traits (see `vault_sync::network`'s `SyncNodeSeam` / `VaultGossipExt`).
 
 ## What's in the box
 
@@ -53,7 +53,7 @@ let node = P2pNode::with_sync_alpn(secret_key, &relays, allowlist, SYNC_ALPN, ha
 let topic = node.join_topic(topic_from_u64(my_id), bootstrap_peers).await?;
 ```
 
-`sync-core` is the reference consumer — see its `network` module for the seam in practice.
+`vault-sync` is the reference consumer — see its `network` module for the seam in practice.
 
 ## The `test-util` feature
 

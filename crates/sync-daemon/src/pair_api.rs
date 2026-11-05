@@ -90,7 +90,7 @@ pub enum DaemonCommand {
     /// The daemon runs mDNS for up to 10 seconds, sending each `DiscoveredMesh`
     /// as it appears. The channel is closed when the scan completes.
     StartDiscovery {
-        reply: mpsc::UnboundedSender<sync_core::network::discovery::DiscoveredMesh>,
+        reply: mpsc::UnboundedSender<p2p_core::discovery::DiscoveredMesh>,
     },
     /// Connect to the selected mesh's peer and initiate the pairing handshake,
     /// causing the responder to generate + display the 6-digit code. Parks the

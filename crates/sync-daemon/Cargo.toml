@@ -9,11 +9,10 @@ name = "sync-daemon"
 path = "src/main.rs"
 
 [dependencies]
-sync-core = { path = "../sync-core", features = ["native"] }
 # Peer identity + file-backed key storage (FileKeyStorage, IdentityKey).
 p2p-core = { path = "../p2p-core" }
-# vault-sync has no Cargo features — its native/wasm fork is `cfg(target_arch)`,
-# so this dep line is bare (a `features = [...]` spec would fail to resolve).
+# vault-sync's default `network` feature carries the iroh sync seam (SyncNode,
+# gossip, PeerRegistry); `--no-default-features` is the pure Loro + FileSystem core.
 vault-sync = { path = "../vault-sync" }
 memory-common = { path = "../memory-common" }
 tokio.workspace = true
@@ -67,7 +66,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 # strings in this suite are tracing target names, not crate references.)
 bincode.workspace = true
 anyhow.workspace = true
-# `test-util` exposes SyncNode::new_relay_only for the off-LAN/NAT repro tests.
-# Cargo unifies this with the production [dependencies] entry above, so it only
-# affects test builds — plain `cargo build` keeps sync-core at `native` only.
-sync-core = { path = "../sync-core", features = ["native", "test-util"] }
+# `test-util` exposes SyncNode::new_relay_only_with_sync_handler for the
+# off-LAN/NAT repro tests (it also turns on p2p-core/test-util). Cargo unifies this
+# with the production [dependencies] entry, so it only affects test builds.
+vault-sync = { path = "../vault-sync", features = ["test-util"] }

@@ -12,7 +12,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use web_time::SystemTime;
 
-use crate::peer_id::PeerId;
+use p2p_core::PeerId;
 
 /// Liveness state of a peer in the gossip swarm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

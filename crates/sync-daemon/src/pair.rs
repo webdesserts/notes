@@ -14,15 +14,13 @@ use futures::StreamExt;
 use std::sync::Arc;
 use tracing::debug;
 
+use p2p_core::PeerId;
+use p2p_core::allowlist::InMemoryAllowlist;
+use p2p_core::discovery::{DiscoveredMesh, mesh_from_discovery_event};
+use p2p_core::pairing::PairingHello;
+use p2p_core::pairing_handler::pair_with_mesh_interactive;
 use p2p_core::{FileAllowlistStorage, PeerAddr};
-use sync_core::allowlist::InMemoryAllowlist;
-use sync_core::network::{
-    SyncNode, SyncNodeSeam,
-    discovery::{DiscoveredMesh, mesh_from_discovery_event},
-    pairing::pair_with_mesh_interactive,
-};
-use sync_core::pairing::PairingHello;
-use sync_core::peer_id::PeerId;
+use vault_sync::network::{RejectSyncHandler, SyncNode, SyncNodeSeam};
 
 use crate::persistence::DaemonConfig;
 
@@ -51,11 +49,15 @@ pub async fn run(vault_path: PathBuf, device_name: Option<String>) -> Result<()>
     let pairing_allowlist = Arc::new(InMemoryAllowlist::new());
 
     // Create a minimal SyncNode (no relay needed for LAN pairing). Pairing only
-    // drives the pairing ALPN, so the default sync handler's inbound receiver is
-    // unused here.
-    let (sync_node, _inbound_sync_rx) = SyncNode::new(secret_key_bytes, &[], pairing_allowlist)
-        .await
-        .context("Failed to create iroh SyncNode")?;
+    // drives the pairing ALPN, so inbound sync streams are rejected.
+    let sync_node = SyncNode::new_with_sync_handler(
+        secret_key_bytes,
+        &[],
+        pairing_allowlist,
+        RejectSyncHandler,
+    )
+    .await
+    .context("Failed to create iroh SyncNode")?;
 
     // Run the pairing logic, then unconditionally shut down the SyncNode to
     // release UDP sockets and tokio tasks regardless of the outcome.
@@ -87,7 +89,7 @@ async fn pair_inner(
     // Collect meshes for up to 10 seconds, deduplicating by vault_id.
     let mut meshes: HashMap<String, DiscoveredMesh> = HashMap::new();
 
-    let deadline = tokio::time::sleep(sync_core::time_scale::scaled(Duration::from_secs(
+    let deadline = tokio::time::sleep(p2p_core::time_scale::scaled(Duration::from_secs(
         DISCOVERY_TIMEOUT_SECS,
     )));
     futures::pin_mut!(discovery_stream);

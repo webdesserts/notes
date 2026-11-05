@@ -8,16 +8,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use p2p_core::PeerId;
+use p2p_core::allowlist::{AllowlistStorage, InMemoryAllowlist};
 use p2p_core::{EndpointId, MemoryLookup, RelayAddr};
-use sync_core::allowlist::{AllowlistStorage, InMemoryAllowlist};
-use sync_core::network::{SyncNode, SyncNodeSeam, gossip::VaultGossip};
-use sync_core::peer_id::{PeerId, VaultId};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use vault_sync::Vault;
+use vault_sync::VaultId;
 use vault_sync::fs::InMemoryFs;
+use vault_sync::network::{SyncNode, SyncNodeSeam, gossip::VaultGossip};
 
 use sync_daemon::daemon::Daemon;
 use sync_daemon::watcher::{FileEvent, FileEventKind};
@@ -186,9 +187,8 @@ where
 
 /// Shared gossip topic so all test daemons join the same swarm.
 ///
-/// Returns a `sync_core::VaultId` — the iroh gossip layer (`join_vault_gossip`)
-/// speaks sync-core's VaultId. The vault's own `vault_id()` returns a
-/// `vault_sync::VaultId`; the two are bridged through `u64` at the gossip boundary.
+/// Returns a `vault_sync::VaultId` — the same type the vault's own `vault_id()`
+/// returns and the gossip layer (`join_vault_gossip`) takes as its topic key.
 #[allow(dead_code)]
 pub fn shared_vault_id() -> VaultId {
     "cafebabecafebabe".parse().unwrap()

@@ -1,7 +1,7 @@
 //! Boot reconciliation: bring the Index back in sync with the filesystem before
 //! the vault opens to remote sync (INV-7, FR-7).
 //!
-//! Carried from `sync-core`'s `vault/reconcile.rs`, re-keyed on UUID. Despite living
+//! Carried from the legacy sync crate's `vault/reconcile.rs`, re-keyed on UUID. Despite living
 //! under `index/`, this is an `impl<F: FileSystem> Vault<F>` block: reconcile needs
 //! the filesystem, the document cache, and the Index together — all of which the
 //! public [`Vault`] handle owns. The Index alone is fs-agnostic.
@@ -577,7 +577,7 @@ impl<F: FileSystem> Vault<F> {
     ///   alive node is never tombstoned after `rebuild_caches`).
     ///
     /// Under UUID keying `has_loro ⟹ has_node` (a content `.loro` is located via its
-    /// node's UUID), so the `(loro, no node)` adopt arm that `sync-core`'s per-file
+    /// node's UUID), so the `(loro, no node)` adopt arm that the legacy sync crate's per-file
     /// loop carried does not apply here — the orphan-adopt is content-paired in
     /// `adopt_orphans` (OQ-3 removed the per-path stored path it would have keyed on).
     async fn reconcile_one_file(&self, path: &str, report: &mut ReconcileReport) -> Result<()> {

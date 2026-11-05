@@ -11,12 +11,12 @@ use std::path::Path;
 
 use p2p_core::PeerId;
 use p2p_core::RelayAddr;
-use sync_core::network::{SyncNode, VaultGossipExt};
-use sync_core::peer_id::VaultId;
 use tracing::warn;
+use vault_sync::VaultId;
+use vault_sync::network::{SyncNode, VaultGossipExt};
 // The on-disk `.sync/metadata.toml` is owned by the vault-sync engine; `NativeFs`
 // implements vault-sync's `FileSystem`, so the metadata round-trip goes through
-// `vault_sync::SyncMetadata` (the format is byte-identical to the old sync-core one).
+// `vault_sync::SyncMetadata` (the format is byte-identical to the legacy sync crate's).
 use vault_sync::SyncMetadata;
 
 use crate::native_fs::NativeFs;
@@ -30,10 +30,6 @@ use crate::native_fs::NativeFs;
 /// sync; this on-disk variant is the equivalent for the exit-then-restart CLI.
 pub async fn adopt_vault_id_on_disk(vault_path: &Path, new_id: VaultId) -> anyhow::Result<()> {
     let fs = NativeFs::new(vault_path.to_path_buf());
-    // `new_id` is the mesh's `sync_core::VaultId` recovered from the gossip topic;
-    // bridge it through `u64` to the `vault_sync::VaultId` the metadata file speaks
-    // (both newtypes wrap the same u64 and serialize to identical hex).
-    let new_id = vault_sync::VaultId::from(new_id.as_u64());
     let existing = SyncMetadata::load_or_migrate(&fs).await?;
     if existing.vault_id == new_id {
         return Ok(());
@@ -132,8 +128,8 @@ pub fn vault_id_from_pairing_topic(vault_topic: Option<[u8; 32]>) -> Option<Vaul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sync_core::allowlist::InMemoryAllowlist;
-    use sync_core::network::SyncNodeSeam;
+    use p2p_core::allowlist::InMemoryAllowlist;
+    use vault_sync::network::{RejectSyncHandler, SyncNodeSeam};
 
     /// Regression: adopting a pairing relay must NOT clobber the daemon's own
     /// advertised `relay_url` out of `daemon.toml`, and the adopted relay lands
@@ -169,10 +165,14 @@ mod tests {
         // of persist_adopted_relay has something to call. Use our persisted
         // identity so node_id() matches the config's peer_id.
         let allowlist = Arc::new(InMemoryAllowlist::new());
-        let (sync_node, _inbound_sync_rx) =
-            SyncNode::new(identity.secret_key_bytes(), &[], allowlist)
-                .await
-                .expect("failed to build SyncNode for test");
+        let sync_node = SyncNode::new_with_sync_handler(
+            identity.secret_key_bytes(),
+            &[],
+            allowlist,
+            RejectSyncHandler,
+        )
+        .await
+        .expect("failed to build SyncNode for test");
 
         // The responder is a DIFFERENT device, so its id won't trip the self-skip
         // in the live-lookup seed (`add_peer_relay`).

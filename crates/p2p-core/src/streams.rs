@@ -2,9 +2,9 @@
 //!
 //! These helpers frame raw byte payloads on an iroh bi-stream using a simple
 //! `[u32 little-endian length][bytes]` envelope. They are protocol-agnostic —
-//! both the vault-sync handler (`SYNC_ALPN`, in sync-core) and the pairing
-//! handler (`PAIRING_ALPN`) reuse them — so they live in p2p-core, the shared
-//! networking substrate.
+//! the pairing handler (`PAIRING_ALPN`) uses them, and the daemon's pumped
+//! `SYNC_ALPN` path re-derives the same envelope — so they live in p2p-core, the
+//! shared networking substrate.
 
 use anyhow::Result;
 use iroh::endpoint::{RecvStream, SendStream};

@@ -26,7 +26,7 @@ use rand::Rng;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
-use crate::allowlist::AllowedPeer;
+use p2p_core::allowlist::AllowedPeer;
 
 /// Maximum size of a gossip message payload in bytes.
 ///

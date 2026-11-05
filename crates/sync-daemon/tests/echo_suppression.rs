@@ -15,7 +15,7 @@
 mod echo_suppression {
     use std::sync::Arc;
 
-    use sync_core::peer_id::PeerId;
+    use p2p_core::PeerId;
     use sync_daemon::NativeFs;
     use tempfile::tempdir;
     use vault_sync::Vault;

@@ -9,7 +9,6 @@ members = [
     "crates/semantic-embeddings",
     "crates/auth-service",
     "crates/p2p-core",
-    "crates/sync-core",
     "crates/sync-daemon",
     "crates/desktop",
     "crates/vault-sync",

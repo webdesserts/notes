@@ -13,10 +13,10 @@ mod daemon_reconnect {
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
 
-    use sync_core::allowlist::AllowlistStorage;
-    use sync_core::network::VaultGossipExt;
-    use sync_core::peer_id::PeerId;
+    use p2p_core::PeerId;
+    use p2p_core::allowlist::AllowlistStorage;
     use vault_sync::fs::FileSystem;
+    use vault_sync::network::VaultGossipExt;
 
     use sync_daemon::daemon::Daemon;
     use sync_daemon::watcher::{FileEvent, FileEventKind};

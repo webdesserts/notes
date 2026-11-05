@@ -1,6 +1,6 @@
 /// Integration test: boot reconcile is resilient to a per-file failure on a real fs.
 ///
-/// Background (the sync-core lineage of this guard): `NativeFs` once mapped every IO
+/// Background (the legacy sync crate lineage of this guard): `NativeFs` once mapped every IO
 /// error to `FsError::Io`, but the skip-deleted-file guard only matches
 /// `FsError::NotFound`. On native vaults a `NotFound` that surfaced as `Io` aborted the
 /// whole pass — taking unrelated files down with the one that failed. `InMemoryFs`
@@ -20,7 +20,7 @@
 mod reconcile_missing_file {
     use std::sync::Arc;
 
-    use sync_core::peer_id::PeerId;
+    use p2p_core::PeerId;
     use sync_daemon::NativeFs;
     use tempfile::tempdir;
     use vault_sync::Vault;

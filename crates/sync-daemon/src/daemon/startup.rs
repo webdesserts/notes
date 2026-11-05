@@ -15,11 +15,11 @@ use tracing::{info, warn};
 use p2p_core::FileAllowlistStorage;
 use p2p_core::PeerId;
 use p2p_core::RelayAddr;
-use sync_core::allowlist::AllowlistStorage;
-use sync_core::network::discovery::MeshMetadata;
-use sync_core::network::{SyncNode, SyncNodeSeam, VaultGossipExt};
+use p2p_core::allowlist::AllowlistStorage;
+use p2p_core::discovery::MeshMetadata;
 use vault_sync::Vault;
 use vault_sync::fs::FileSystem;
+use vault_sync::network::{SyncNode, SyncNodeSeam, VaultGossipExt};
 
 use crate::daemon_lock::DaemonLock;
 use crate::http;
@@ -219,7 +219,7 @@ async fn startup_inner(
     // read; the desktop app and WASM plugin never seed it.
     if let Ok(raw) = std::env::var("OBSIDIAN_MEMORY_TIME_SCALE") {
         match raw.parse::<f64>() {
-            Ok(scale) if sync_core::time_scale::set_time_scale(scale) => {
+            Ok(scale) if p2p_core::time_scale::set_time_scale(scale) => {
                 info!(
                     scale,
                     "OBSIDIAN_MEMORY_TIME_SCALE active — durations scaled (test mode)"
@@ -266,11 +266,7 @@ async fn startup_inner(
         Vault::init(fs, author).await?
     };
 
-    // `vault.vault_id()` is a `vault_sync::VaultId`, but the iroh layer
-    // (`join_vault_gossip`, `MeshMetadata.vid`) speaks `sync_core::VaultId`. Bridge
-    // through `u64` here at the network boundary (both newtypes wrap the same u64 and
-    // produce identical hex), leaving the iroh layer's type untouched.
-    let vault_id = sync_core::VaultId::from(vault.vault_id().as_u64());
+    let vault_id = vault.vault_id();
     info!("Vault loaded, vault ID: {}", vault_id);
 
     // Wrap the vault in its shared handle NOW, before the SyncNode is built: the
@@ -525,11 +521,9 @@ async fn startup_inner(
     let watcher = FileWatcher::new(config.vault.clone())?;
     info!("File watcher started");
 
-    let discovery_rx: Option<
-        tokio::sync::mpsc::Receiver<sync_core::network::discovery::DiscoveredMesh>,
-    > = {
+    let discovery_rx: Option<tokio::sync::mpsc::Receiver<p2p_core::discovery::DiscoveredMesh>> = {
         use futures::StreamExt;
-        use sync_core::network::discovery::{DiscoveryEvent, mesh_from_discovery_event};
+        use p2p_core::discovery::{DiscoveryEvent, mesh_from_discovery_event};
 
         if let Some(stream) = sync_node.subscribe_discovery().await {
             let (tx, rx) = tokio::sync::mpsc::channel(16);

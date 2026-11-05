@@ -3,7 +3,7 @@
 //!
 //! This crate owns the generic, application-agnostic pieces of the iroh-based mesh:
 //! peer identity, key storage, the embedded relay, and (in later increments) the
-//! node, pairing, and discovery layers. `sync-core` depends on `p2p-core` and
+//! node, pairing, and discovery layers. `vault-sync` (feature `network`) depends on `p2p-core` and
 //! layers the vault-sync wire protocol on top of it.
 //!
 //! p2p-core is **native-only** — it carries no `cfg(target_arch = "wasm32")`
@@ -65,13 +65,13 @@ pub use relay::EmbeddedRelay;
 pub use relay_addr::{RelayAddr, RelayAddrError};
 pub use relay_class::relay_is_offlan_reachable;
 
-/// The gossip protocol ALPN, re-exported so sync-core (and the daemon's reconnect
+/// The gossip protocol ALPN, re-exported so vault-sync (and the daemon's reconnect
 /// supervisor) can open gossip-bound connections without taking a direct
 /// dependency on `iroh-gossip`.
 pub use iroh_gossip::net::GOSSIP_ALPN;
 
 /// Iroh value types re-exported for downstream TEST HARNESSES ONLY (gated behind
-/// `test-util`). These let sync-core / sync-daemon integration tests name iroh's
+/// `test-util`). These let vault-sync / sync-daemon integration tests name iroh's
 /// transport types WITHOUT a direct `iroh` dev-dependency — re-export the dep, the
 /// type stays iroh's, scoped to test builds so production never sees this surface.
 /// NOT part of p2p-core's production API. (The `relay_probe` diagnostic uses raw

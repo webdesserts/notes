@@ -21,7 +21,7 @@ mod migration {
     use std::collections::BTreeSet;
     use std::sync::Arc;
 
-    use sync_core::peer_id::PeerId;
+    use p2p_core::PeerId;
     use sync_daemon::NativeFs;
     use tempfile::tempdir;
     use uuid::Uuid;

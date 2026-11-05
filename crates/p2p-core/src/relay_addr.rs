@@ -1,7 +1,7 @@
 //! The relay-address value type.
 //!
 //! `RelayAddr` is p2p-core's wrapper over iroh's `RelayUrl`, carrying the exact
-//! same parsed-and-validated value. It exists so consumers (sync-core, the
+//! same parsed-and-validated value. It exists so consumers (vault-sync, the
 //! daemon) speak p2p-core's vocabulary at the API boundary instead of naming
 //! iroh directly. The wrapped value is byte-identical to the iroh type, so
 //! nothing on the wire or on disk changes.

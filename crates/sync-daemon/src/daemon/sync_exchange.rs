@@ -11,11 +11,12 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
+use p2p_core::PeerId;
+use p2p_core::allowlist::AllowlistStorage;
 use p2p_core::{DialHandle, PeerAddr};
-use sync_core::allowlist::AllowlistStorage;
-use sync_core::{PeerId, PeerRegistry};
 use vault_sync::Vault;
 use vault_sync::fs::FileSystem;
+use vault_sync::network::PeerRegistry;
 
 use super::{ExchangeLearned, now_ms};
 
@@ -64,7 +65,7 @@ pub(super) fn spawn_sync_exchange<FS, AL>(
         // (this exchange is driven by a live gossip neighbour / received change), so
         // the connect cannot hit the legacy-id arm.
         let connection = match dial
-            .connect(&PeerAddr::new(target), sync_core::network::SYNC_ALPN)
+            .connect(&PeerAddr::new(target), vault_sync::network::SYNC_ALPN)
             .await
         {
             Ok(conn) => conn,
