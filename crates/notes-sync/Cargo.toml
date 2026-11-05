@@ -1,15 +1,15 @@
 [package]
-name = "memory"
+name = "notes-sync"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository = "https://github.com/webdesserts/obsidian-memory"
 homepage = "https://github.com/webdesserts/obsidian-memory"
-description = "MCP server for Obsidian memory integration with Claude"
+description = "MCP server and CLI for an Obsidian notes vault"
 
 [lib]
-name = "memory"
+name = "notes"
 path = "src/lib.rs"
 
 [[bin]]

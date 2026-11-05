@@ -1,7 +1,7 @@
 //! sync-daemon: Headless P2P sync daemon for home server.
 //!
 //! Thin wrapper around `sync_daemon::daemon::run()` — all logic lives in the
-//! library so the `memory` binary can embed it behind a feature flag.
+//! library so the `notes` binary can embed it behind a feature flag.
 
 use anyhow::Result;
 use clap::Parser;

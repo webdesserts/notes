@@ -1,7 +1,7 @@
 //! `notes` CLI: MCP server (stdio / HTTP) and P2P vault sync.
 
 use clap::Parser;
-use memory::{Config, run_http_server, run_stdio_server};
+use notes::{Config, run_http_server, run_stdio_server};
 use std::path::PathBuf;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
@@ -187,7 +187,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             health_listen,
             verbose,
         }) => {
-            memory_common::init_tracing(verbose, "memory");
+            memory_common::init_tracing(verbose, "notes");
 
             let vault_str = vault.to_string_lossy().to_string();
 

@@ -1,5 +1,5 @@
 //! Note-editing core: heading-path section addressing and content-hash-guarded
-//! storage. Extracted from the `memory` MCP server crate so the same
+//! storage. Extracted from the `notes-sync` MCP server crate so the same
 //! outline/section-resolve/hash-verify mechanism can be shared by any
 //! note-editing consumer (the MCP server today; a harness's native
 //! hash-guarded read/write tools are the intended second consumer).

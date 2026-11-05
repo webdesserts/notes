@@ -32,7 +32,7 @@
             uri /validate
             copy_headers Authorization
         }
-        reverse_proxy memory:3000 {
+        reverse_proxy notes:3000 {
             # Critical: disable buffering for SSE streaming
             flush_interval -1
             header_up X-Forwarded-Proto {scheme}

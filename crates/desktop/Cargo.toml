@@ -14,7 +14,7 @@ tauri-build = { version = "2", features = [] }
 sync-daemon = { path = "../sync-daemon" }
 memory-common = { path = "../memory-common" }
 # Shared notes MCP HTTP server, run in-process (sync feature off: desktop runs sync-daemon itself)
-memory = { path = "../memory", default-features = false }
+notes-sync = { path = "../notes-sync", default-features = false }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"

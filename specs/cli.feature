@@ -1,5 +1,5 @@
 Feature: CLI Commands
-  The `memory` binary provides a unified CLI for managing MCP and sync
+  The `notes` binary provides a unified CLI for managing MCP and sync
   services. There are two primary modes of operation, plus a future third:
 
   - **Client mode**: The MCP server runs on-demand via stdio, launched by
@@ -79,7 +79,7 @@ Feature: CLI Commands
   # --- Help & Discoverability ---
 
   Scenario: No subcommand shows help
-    When I run `memory` with no arguments
+    When I run `notes` with no arguments
     Then it should display help text listing available subcommands
     And it should not start any server
 

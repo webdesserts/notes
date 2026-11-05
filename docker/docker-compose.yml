@@ -24,8 +24,8 @@ services:
         max-file: "3"
 
   # MCP server (HTTP transport)
-  memory:
-    image: ghcr.io/webdesserts/memory:${VERSION:-latest}
+  notes:
+    image: ghcr.io/webdesserts/notes-sync:${VERSION:-latest}
     volumes:
       - notes:/notes:rw
     environment:
@@ -50,7 +50,7 @@ services:
 
   # P2P vault sync daemon
   sync:
-    image: ghcr.io/webdesserts/memory:${VERSION:-latest}
+    image: ghcr.io/webdesserts/notes-sync:${VERSION:-latest}
     volumes:
       - notes:/notes:rw
     environment:

@@ -240,7 +240,7 @@ fn main() -> Result<()> {
                 info!("Notes MCP server: starting on http://{}/mcp", mcp_listen);
                 let shutdown = async move { mcp_token.cancelled().await };
                 if let Err(e) =
-                    memory::serve_http(memory::Config::new(&mcp_vault), &mcp_listen, shutdown).await
+                    notes::serve_http(notes::Config::new(&mcp_vault), &mcp_listen, shutdown).await
                 {
                     warn!("Notes MCP server on {} stopped: {}", mcp_listen, e);
                 }

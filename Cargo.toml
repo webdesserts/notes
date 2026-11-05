@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/memory",
+    "crates/notes-sync",
     "crates/memory-common",
     "crates/wiki-links",
     "crates/obsidian-fs",

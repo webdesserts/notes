@@ -1739,8 +1739,8 @@ name = "desktop"
 version = "0.5.3"
 dependencies = [
  "anyhow",
- "memory",
  "memory-common",
+ "notes-sync",
  "serde",
  "serde_json",
  "sync-daemon",
@@ -4567,43 +4567,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "memory"
-version = "0.5.3"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "chrono",
- "clap",
- "dirs 6.0.0",
- "futures-util",
- "hex",
- "http-body-util",
- "memory-common",
- "notes-core",
- "notify",
- "notify-debouncer-mini",
- "obsidian-fs",
- "once_cell",
- "regex",
- "reqwest 0.12.28",
- "rmcp",
- "schemars 1.2.1",
- "semantic-embeddings",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sync-daemon",
- "tempfile",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "urlencoding",
- "wiki-links",
-]
-
-[[package]]
 name = "memory-common"
 version = "0.5.3"
 dependencies = [
@@ -5082,6 +5045,43 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "notes-sync"
+version = "0.5.3"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "chrono",
+ "clap",
+ "dirs 6.0.0",
+ "futures-util",
+ "hex",
+ "http-body-util",
+ "memory-common",
+ "notes-core",
+ "notify",
+ "notify-debouncer-mini",
+ "obsidian-fs",
+ "once_cell",
+ "regex",
+ "reqwest 0.12.28",
+ "rmcp",
+ "schemars 1.2.1",
+ "semantic-embeddings",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sync-daemon",
+ "tempfile",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "urlencoding",
+ "wiki-links",
 ]
 
 [[package]]

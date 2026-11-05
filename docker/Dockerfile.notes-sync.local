@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1
 #
-# LOCAL-ONLY build for memory — NOT the canonical release pipeline.
-# docker/Dockerfile.memory downloads a pre-built cargo-dist release artifact
+# LOCAL-ONLY build for notes-sync — NOT the canonical release pipeline.
+# docker/Dockerfile.notes-sync downloads a pre-built cargo-dist release artifact
 # published by .github/workflows/docker.yml (triggered by a real semver git
-# tag). This Dockerfile compiles memory from the local working tree instead,
+# tag). This Dockerfile compiles notes from the local working tree instead,
 # for staging a code change ahead of a real release. Do not wire this into
 # CI or the ghcr.io publish pipeline.
 
@@ -11,17 +11,17 @@ FROM rust:bookworm AS builder
 
 WORKDIR /build
 
-# memory has path dependencies on other workspace crates (wiki-links,
-# obsidian-fs, notes-core, etc.), so `cargo build -p memory` needs the whole
+# notes-sync has path dependencies on other workspace crates (wiki-links,
+# obsidian-fs, notes-core, etc.), so `cargo build -p notes-sync` needs the whole
 # workspace to resolve. See .dockerignore for exclusions (target/, .git/).
 COPY . .
 
 # -j2: the build VM's memory budget can't sustain default (CPU-count) rustc
 # parallelism against this workspace's heavier deps (loro-internal OOM-killed
 # at unbounded parallelism during staging).
-RUN cargo build --release -p memory -j 2
+RUN cargo build --release -p notes-sync -j 2
 
-# --- Runtime layer, mirrored from docker/Dockerfile.memory (the canonical image) ---
+# --- Runtime layer, mirrored from docker/Dockerfile.notes-sync (the canonical image) ---
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
@@ -31,12 +31,12 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /build/target/release/notes /usr/local/bin/notes
 
 # Create non-root user (UID 1000 for consistency with the canonical image)
-RUN useradd -m -u 1000 memory
+RUN useradd -m -u 1000 notes
 
 # Create vault and config mount points
-RUN mkdir -p /notes /config && chown memory:memory /notes /config
+RUN mkdir -p /notes /config && chown notes:notes /notes /config
 
-USER memory
+USER notes
 WORKDIR /notes
 
 EXPOSE 3000

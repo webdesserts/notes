@@ -20,13 +20,13 @@ Obsidian Memory is an [MCP](https://modelcontextprotocol.io/) server that lets C
 
 ```bash
 brew tap webdesserts/tap
-brew install webdesserts/tap/memory
+brew install webdesserts/tap/notes-sync
 ```
 
 ### Option 2: Shell Script (Mac/Linux)
 
 ```bash
-curl -fsSL https://github.com/webdesserts/obsidian-memory/releases/latest/download/obsidian-memory-mcp-installer.sh | sh
+curl -fsSL https://github.com/webdesserts/obsidian-memory/releases/latest/download/notes-sync-installer.sh | sh
 ```
 
 ### Option 3: Build from Source
@@ -36,7 +36,7 @@ Requires Rust toolchain ([rustup.rs](https://rustup.rs)).
 ```bash
 git clone https://github.com/webdesserts/obsidian-memory.git
 cd obsidian-memory
-cargo install --path crates/memory
+cargo install --path crates/notes-sync
 ```
 
 Note: Building from source downloads the embedding model from HuggingFace at runtime on first launch. Pre-built binaries have the model embedded and work offline or on corporate networks that block HuggingFace.
@@ -182,14 +182,14 @@ Requires Rust 1.85+ (edition 2024).
 cargo test
 
 # Run locally (downloads model from HuggingFace on first run)
-cargo run -p memory -- mcp io --vault ~/notes
+cargo run -p notes-sync -- mcp io --vault ~/notes
 
 # Build release
 cargo build --release
 
 # Build with embedded model (for testing release builds)
 ./scripts/download-model.sh
-cargo build --features embedded-model -p memory
+cargo build --features embedded-model -p notes-sync
 ```
 
 ## Troubleshooting

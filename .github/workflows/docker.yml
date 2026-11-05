@@ -8,7 +8,7 @@ on:
       # Release manifest (dist-manifest.json) with fields:
       #   - announcement_tag: git tag (e.g., "v0.2.8") - use for GitHub Release URLs
       #   - releases[].app_version: semver without prefix (e.g., "0.2.8")
-      #   - releases[].app_name: binary name (e.g., "memory")
+      #   - releases[].app_name: binary name (e.g., "notes-sync")
       plan:
         required: true
         type: string
@@ -18,7 +18,7 @@ env:
   OWNER: webdesserts
 
 jobs:
-  build-memory:
+  build-notes-sync:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,25 +44,25 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/memory
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/notes-sync
           tags: |
             type=semver,pattern={{version}},value=${{ steps.version.outputs.version }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }}
             type=raw,value=latest
 
-      - name: Build and push memory
+      - name: Build and push notes-sync
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/Dockerfile.memory
+          file: docker/Dockerfile.notes-sync
           platforms: linux/amd64,linux/arm64
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=memory
-          cache-to: type=gha,mode=max,scope=memory
+          cache-from: type=gha,scope=notes-sync
+          cache-to: type=gha,mode=max,scope=notes-sync
 
   build-auth:
     runs-on: ubuntu-latest
