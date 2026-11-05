@@ -35,16 +35,16 @@ hmac = "0.12"
 # `default` enables direct socket binding (mDNS lives on real LAN interfaces);
 # p2p-core is unconditionally native.
 # Versions mirror sync-daemon's declarations.
-iroh = { version = "1.0.0-rc.1", default-features = false, features = [
+iroh = { version = "1.4.1", default-features = false, features = [
     "tls-ring",
     "default",
     "platform-verifier",
 ] }
-iroh-relay = { version = "1.0.0-rc.1", features = ["server"] }
+iroh-relay = { version = "1.4.1", features = ["server"] }
 # iroh-gossip — HyParView membership + PlumTree broadcast. The node registers the
 # gossip ALPN + handler and exposes `join_topic`; `GOSSIP_ALPN`/`Gossip`/`TopicId`
 # come from here.
-iroh-gossip = { version = "0.100", default-features = false, features = ["net"] }
+iroh-gossip = { version = "0.102.0", default-features = false, features = ["net"] }
 # mDNS mesh discovery actor (native-only, the `obsidian-sync` service).
 mdns-sd = "0.20"
 # BASE32 encoding of the mDNS instance name + relay-url decode.

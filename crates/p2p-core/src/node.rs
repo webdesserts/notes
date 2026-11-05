@@ -272,7 +272,7 @@ impl P2pNode {
             // independently end-to-end encrypted via QUIC/TLS1.3 keyed to node
             // identities, so this only affects what a relay-hop MITM can see (peer
             // public keys, connection timing), never note content.
-            .ca_roots_config(iroh::tls::CaRootsConfig::system());
+            .ca_tls_config(iroh::tls::CaTlsConfig::system());
         // Relay-only: drop every IP transport so no direct/loopback path exists —
         // the endpoint must route through a relay (the off-LAN/NAT condition).
         let builder = if relay_only {
@@ -585,6 +585,12 @@ impl P2pNode {
                     Event::Lagged => {
                         debug!("Gossip lagged (message buffer overflow)");
                         GossipEvent::Lagged
+                    }
+                    // iroh-gossip 0.102 marks `Event` #[non_exhaustive]; variants
+                    // added upstream carry nothing the app consumes yet.
+                    other => {
+                        debug!(?other, "Ignoring unhandled gossip event");
+                        continue;
                     }
                 };
 
