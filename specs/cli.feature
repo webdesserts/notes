@@ -16,24 +16,24 @@ Feature: CLI Commands
     CLI which manages a shared server behind the scenes.
 
   # --- Client Mode ---
-  # The agent's MCP config invokes `memory mcp io --vault ~/notes` to start
+  # The agent's MCP config invokes `notes mcp io --vault ~/notes` to start
   # an on-demand stdio session. No sync daemon needed — the Obsidian plugin
   # handles it.
 
   Scenario: Agent launches MCP server via stdio
-    Given an agent MCP config that runs `memory mcp io --vault ~/notes`
+    Given an agent MCP config that runs `notes mcp io --vault ~/notes`
     When the agent starts a session
     Then the MCP server should start with stdio transport
     And it should accept MCP protocol messages on stdin/stdout
     And it should exit when the agent disconnects
 
-  Scenario: User runs `memory mcp` interactively
-    When I run `memory mcp` in a terminal
+  Scenario: User runs `notes mcp` interactively
+    When I run `notes mcp` in a terminal
     Then it should display help for MCP subcommands (io, up)
     And it should not start any server
 
   Scenario: Missing --vault shows error
-    When I run `memory mcp io` without --vault
+    When I run `notes mcp io` without --vault
     Then it should display an error about the missing --vault flag
     And it should not start any server
 
@@ -43,37 +43,37 @@ Feature: CLI Commands
 
   Scenario: Start all services on a home server
     Given a vault exists at "/home/user/notes"
-    When I run `memory up --vault /home/user/notes`
+    When I run `notes up --vault /home/user/notes`
     Then the sync daemon should start and listen for peer connections
     And the MCP HTTP server should start and listen for requests
     And both should run concurrently in the foreground
 
   Scenario: Start only the sync daemon
     Given a vault exists at "/home/user/notes"
-    When I run `memory sync up --vault /home/user/notes`
+    When I run `notes sync up --vault /home/user/notes`
     Then the sync daemon should start and listen for peer connections
     And the MCP server should not start
 
   Scenario: Start only the MCP HTTP server
-    When I run `memory mcp up --vault ~/notes`
+    When I run `notes mcp up --vault ~/notes`
     Then the MCP server should start with HTTP transport
     And it should listen on 127.0.0.1:3000 by default
     And the sync daemon should not start
 
   Scenario: Graceful shutdown on Ctrl+C
-    Given all services are running via `memory up`
+    Given all services are running via `notes up`
     When I send SIGINT (Ctrl+C)
     Then both the sync daemon and MCP server should shut down gracefully
 
   # --- Configuration ---
 
   Scenario: Custom MCP HTTP listen address
-    When I run `memory mcp up --vault ~/notes --listen 0.0.0.0:8080`
+    When I run `notes mcp up --vault ~/notes --listen 0.0.0.0:8080`
     Then the MCP server should listen on 0.0.0.0:8080
 
   Scenario: Sync daemon with advertised address
     Given a vault exists at "/home/user/notes"
-    When I run `memory sync up --vault /home/user/notes --advertise ws://my.server.com:8080`
+    When I run `notes sync up --vault /home/user/notes --advertise ws://my.server.com:8080`
     Then peers should see the daemon at ws://my.server.com:8080
 
   # --- Help & Discoverability ---
@@ -84,5 +84,5 @@ Feature: CLI Commands
     And it should not start any server
 
   Scenario: Namespace shows subcommand help
-    When I run `memory sync` with no further arguments
+    When I run `notes sync` with no further arguments
     Then it should display help for sync subcommands (up)

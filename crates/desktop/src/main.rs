@@ -48,6 +48,8 @@ const RELAY_PORT: u16 = 3340;
 /// but is commonly taken (e.g. llama-swap), so we standardize on 8082 across all
 /// machines. Make this env-configurable later if a machine ever needs to differ.
 const HEALTH_PORT: u16 = 8082;
+/// Default listen address for the shared notes MCP HTTP server (`NOTES_MCP_LISTEN` overrides).
+const DEFAULT_MCP_LISTEN: &str = "127.0.0.1:8083";
 
 /// Pick the explicitly-configured relay URL, preferring the env var over the
 /// stored value.
@@ -105,7 +107,7 @@ fn main() -> Result<()> {
     // early. tauri.run() is blocking, so _guard held here outlives the entire app run.
     let _guard = memory_common::init_tracing_with_file(false, "desktop", &log_path);
 
-    info!("Starting Memory");
+    info!("Starting NotesSync");
 
     tauri::Builder::default()
         // Plugins must be registered before setup() so that their APIs are
@@ -197,6 +199,8 @@ fn main() -> Result<()> {
                 }
             }
 
+            let mcp_vault = vault_path.to_string_lossy().into_owned();
+
             let daemon_config = DaemonRunConfig {
                 vault: vault_path,
                 identity_key: None,
@@ -221,6 +225,26 @@ fn main() -> Result<()> {
             // - `control` → Tauri managed state (for command handlers)
             // - `token` + `done_rx` → ShutdownController (for Quit handler)
             let (token, control, done_rx) = daemon.into_parts();
+
+            // Shared notes MCP HTTP server: one GraphIndex + EmbeddingManager +
+            // VaultWatcher for every local agent instead of one stdio child per
+            // agent. It stops with the sync daemon on Quit via a child token. A
+            // bind failure (port already taken) only logs a warning and leaves
+            // sync running.
+            let mcp_listen = std::env::var("NOTES_MCP_LISTEN")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| DEFAULT_MCP_LISTEN.to_string());
+            let mcp_token = token.child_token();
+            tauri::async_runtime::spawn(async move {
+                info!("Notes MCP server: starting on http://{}/mcp", mcp_listen);
+                let shutdown = async move { mcp_token.cancelled().await };
+                if let Err(e) =
+                    memory::serve_http(memory::Config::new(&mcp_vault), &mcp_listen, shutdown).await
+                {
+                    warn!("Notes MCP server on {} stopped: {}", mcp_listen, e);
+                }
+            });
 
             // Receivers cloned/extracted before control moves into Arc.
             //

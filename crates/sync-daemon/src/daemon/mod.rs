@@ -1509,7 +1509,7 @@ impl<FS: FileSystem + 'static, AL: AllowlistStorage + 'static> Daemon<FS, AL> {
     ///
     /// The "open until first pair" behavior was removed because it creates a
     /// window where any device on the network can sync before pairing completes.
-    /// Pair first with `memory sync pair`, then start the daemon.
+    /// Pair first with `notes sync pair`, then start the daemon.
     async fn is_peer_allowed(&self, peer_id: &PeerId) -> bool {
         // Delegate to the trait `is_allowed` so the tombstone filter is the single
         // source of truth — an inline `list_peers().any(...)` scan here would treat

@@ -1,3 +1,4 @@
+pub mod backlinks;
 mod common;
 pub mod delete_note;
 pub mod get_current_datetime;

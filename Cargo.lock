@@ -1739,6 +1739,7 @@ name = "desktop"
 version = "0.5.3"
 dependencies = [
  "anyhow",
+ "memory",
  "memory-common",
  "serde",
  "serde_json",

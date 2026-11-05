@@ -12,7 +12,7 @@ ARG VERSION
 RUN for i in 1 2 3 4 5; do \
     curl -fsSL "https://github.com/webdesserts/obsidian-memory/releases/download/${VERSION}/memory-installer.sh" \
     | MEMORY_INSTALL_DIR=/opt/memory sh && break || sleep 10; \
-done && test -x /opt/memory/bin/memory || exit 1
+done && test -x /opt/memory/bin/notes || exit 1
 ENV PATH="/opt/memory/bin:$PATH"
 
 # Create non-root user (UID 1000 for consistency with other containers)
@@ -31,5 +31,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -sf http://localhost:3000/health || exit 1
 
 # Default: run both MCP HTTP + sync daemon together
-ENTRYPOINT ["memory"]
+ENTRYPOINT ["notes"]
 CMD ["up", "--vault", "/notes", "--listen", "0.0.0.0:3000"]

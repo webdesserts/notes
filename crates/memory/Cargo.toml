@@ -8,8 +8,12 @@ repository = "https://github.com/webdesserts/obsidian-memory"
 homepage = "https://github.com/webdesserts/obsidian-memory"
 description = "MCP server for Obsidian memory integration with Claude"
 
-[[bin]]
+[lib]
 name = "memory"
+path = "src/lib.rs"
+
+[[bin]]
+name = "notes"
 path = "src/main.rs"
 
 [features]
@@ -29,7 +33,7 @@ axum = { workspace = true }
 # CLI argument parsing
 clap.workspace = true
 
-# Sync daemon (optional, for `memory sync up` and `memory up`)
+# Sync daemon (optional, for `notes sync up` and `notes up`)
 sync-daemon = { path = "../sync-daemon", optional = true }
 
 # Async runtime

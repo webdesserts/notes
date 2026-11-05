@@ -57,7 +57,7 @@ Do this first, on throwaway data.
 
 **Pair + verify pull (both apps running):**
 5. On the **laptop** (the joining device): tray → "Pair with nearby device…". It scans mDNS and lists umbra's mesh. Select it.
-6. **umbra** pops a responder window + macOS notification with a **6-digit code**. Relay it to the laptop and enter it there. (First inbound pair may trigger a macOS notification-permission prompt — allow it. To re-test: `tccutil reset Notifications com.webdesserts.obsidian-memory`.)
+6. **umbra** pops a responder window + macOS notification with a **6-digit code**. Relay it to the laptop and enter it there. (First inbound pair may trigger a macOS notification-permission prompt — allow it. To re-test: `tccutil reset Notifications com.webdesserts.notes-sync`.)
 7. On a successful pair the laptop **adopts umbra's VaultId, re-joins the topic, and pulls** — within a few seconds umbra's junk notes should appear in the laptop's `~/sync-test`. Confirm the laptop's `~/sync-test/.sync/metadata.toml` now matches umbra's VaultId.
 8. **Bidirectional sync:** edit a `.md` on umbra → it appears on the laptop, and vice versa. Add/delete files — confirm each direction propagates. (Keep edits **sequential** — edit, let it sync, then edit the other side — as good practice.)
 9. ✅ Pull + bidirectional sync working → onboarding proven, proceed to Phase B. ❌ Pairs but nothing pulls → check the laptop's `metadata.toml` actually adopted umbra's VaultId and that both can reach `http://192.168.68.59:3340/`.
@@ -83,4 +83,4 @@ Only after Phase A passes.
 
 ## Fallback: headless pairing (only if umbra's GUI tray is unavailable)
 
-umbra has a GUI, so use the tray. If ever needed headless: with the daemon running, on the joining device run `memory sync pair --vault <path>` (it scans mDNS, prompts for the code on stdin); the responder's 6-digit code prints to the daemon's stderr/logs. The CLI path now also adopts the mesh's VaultId (metadata-only) on a successful pair — a subsequent `memory sync up` then joins the topic and pulls.
+umbra has a GUI, so use the tray. If ever needed headless: with the daemon running, on the joining device run `notes sync pair --vault <path>` (it scans mDNS, prompts for the code on stdin); the responder's 6-digit code prints to the daemon's stderr/logs. The CLI path now also adopts the mesh's VaultId (metadata-only) on a successful pair — a subsequent `notes sync up` then joins the topic and pulls.

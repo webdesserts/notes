@@ -1,4 +1,4 @@
-//! Interactive pairing CLI — `memory sync pair`.
+//! Interactive pairing CLI — `notes sync pair`.
 //!
 //! Discovers nearby meshes via mDNS, lets the user select one, then
 //! runs the pairing exchange. On success, all mesh members are added
@@ -27,7 +27,7 @@ use crate::persistence::DaemonConfig;
 /// How long to listen for mDNS broadcasts before giving up.
 const DISCOVERY_TIMEOUT_SECS: u64 = 10;
 
-/// Run `memory sync pair` interactively.
+/// Run `notes sync pair` interactively.
 ///
 /// Discovers meshes on the LAN, prompts the user to select one, prompts for
 /// the pairing code shown on the mesh member's console, and on success writes
@@ -214,7 +214,7 @@ async fn pair_inner(
     p2p_core::write_pair_allowlist(&allowlist, self_peer_id, device_name, &result.mesh_members)
         .await;
 
-    // Adopt the mesh's VaultId so the next `memory sync up` joins the right
+    // Adopt the mesh's VaultId so the next `notes sync up` joins the right
     // gossip topic. The CLI process exits after pairing, so this is an on-disk
     // metadata rewrite (no live re-join). Persist the mesh relay URL too, for
     // cross-network sync on next start.
@@ -222,7 +222,7 @@ async fn pair_inner(
     // A successful pair without a vault topic is protocol-impossible — the
     // responder always sends one — but structurally possible. Treat it as a
     // failure rather than a silent success: without the adopted id the next
-    // `memory sync up` joins the wrong gossip topic, so pairing "succeeds" but
+    // `notes sync up` joins the wrong gossip topic, so pairing "succeeds" but
     // sync never works.
     let new_id = crate::pair_shared::vault_id_from_pairing_topic(result.vault_topic)
         .context("Paired, but the mesh did not provide a vault topic. Try again.")?;
@@ -242,7 +242,7 @@ async fn pair_inner(
 
     eprintln!();
     eprintln!("Pairing complete. Start the sync daemon to begin syncing.");
-    eprintln!("Run: memory sync up --vault <path>");
+    eprintln!("Run: notes sync up --vault <path>");
 
     Ok(())
 }

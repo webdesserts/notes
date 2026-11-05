@@ -24,7 +24,7 @@ use crate::native_fs::NativeFs;
 /// Rewrite `.sync/metadata.toml` to adopt the mesh's VaultId (CLI path).
 ///
 /// The CLI process does not hold a live in-memory `Vault` during pairing, so it
-/// adopts by rewriting the on-disk metadata directly. The next `memory sync up`
+/// adopts by rewriting the on-disk metadata directly. The next `notes sync up`
 /// reads the adopted VaultId and joins the correct gossip topic. The tray path
 /// instead uses the live `Vault::adopt_vault_id` so its in-memory id stays in
 /// sync; this on-disk variant is the equivalent for the exit-then-restart CLI.

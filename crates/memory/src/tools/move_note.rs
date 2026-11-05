@@ -2,12 +2,14 @@
 
 use obsidian_fs::{ensure_markdown_extension, normalize_note_reference};
 use rmcp::model::{CallToolResult, Content, ErrorData};
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
 
 use super::common::resolve_note_uri;
 use crate::graph::GraphIndex;
 use crate::storage::{Storage, StorageError};
+use wiki_links::extract_linked_notes;
 
 /// Execute the MoveNote tool.
 ///
@@ -71,38 +73,37 @@ pub async fn execute<S: Storage>(
 
     // Extract display names from URIs (last path component)
     let from_name = from_uri.rsplit('/').next().unwrap_or(&from_uri).to_string();
+    let from_path = ensure_markdown_extension(&from_uri);
 
-    // Find and update backlinks before the move
-    let mut backlinks_updated = Vec::new();
-    {
+    // Notes that link to the source by name. Path-qualified links
+    // (`[[folder/Name]]`) are indexed under the bare name too.
+    let mut linking_paths: Vec<String> = {
         let graph_read = graph.read().await;
+        graph_read
+            .get_backlinks(&from_name)
+            .map(|paths| paths.iter().cloned().collect())
+            .unwrap_or_default()
+    };
+    linking_paths.sort();
 
-        // Get notes that link to the source note by name
-        if let Some(linking_paths) = graph_read.get_backlinks(&from_name) {
-            let old_link = format!("[[{}]]", from_name);
-            let new_link = format!("[[{}]]", to_normalized.name);
+    // Rewrite backlinks before the move
+    let mut backlinks_updated = Vec::new();
+    let mut rewritten: Vec<(String, String)> = Vec::new();
+    for path in &linking_paths {
+        // Skip the source note itself
+        if path == &from_path {
+            continue;
+        }
 
-            for path in linking_paths.iter() {
-                // Skip the source note itself
-                if path == &ensure_markdown_extension(&from_uri) {
-                    continue;
-                }
+        // Convert path to URI (remove .md)
+        let uri = path.strip_suffix(".md").unwrap_or(path);
 
-                // Convert path to URI (remove .md)
-                let uri = path.strip_suffix(".md").unwrap_or(path);
-
-                // Read the linking note
-                if let Ok((content, _)) = storage.read(uri).await {
-                    // Replace the wiki-link
-                    if content.contains(&old_link) {
-                        let updated = content.replace(&old_link, &new_link);
-
-                        // Write back
-                        if storage.write(uri, &updated, None).await.is_ok() {
-                            backlinks_updated.push(uri.to_string());
-                        }
-                    }
-                }
+        if let Ok((content, _)) = storage.read(uri).await {
+            let updated =
+                rewrite_wiki_links(&content, &from_name, &from_uri, &to_normalized.name, to_uri);
+            if updated != content && storage.write(uri, &updated, None).await.is_ok() {
+                backlinks_updated.push(uri.to_string());
+                rewritten.push((path.clone(), updated));
             }
         }
     }
@@ -123,6 +124,38 @@ pub async fn execute<S: Storage>(
             ),
             _ => ErrorData::internal_error(format!("Failed to move note: {}", e), None),
         })?;
+
+    // Reflect the move in the graph right away instead of waiting for the
+    // watcher: the moved note under its new path, and the rewritten notes'
+    // new forward links.
+    {
+        let read_links: Option<HashSet<String>> = storage
+            .read(to_uri)
+            .await
+            .ok()
+            .map(|(content, _)| extract_linked_notes(&content).into_iter().collect());
+        let mut g = graph.write().await;
+        let moved_links = read_links
+            .or_else(|| g.get_forward_links(&from_path).cloned())
+            .unwrap_or_default();
+        g.remove_note(&from_name, Path::new(&from_path));
+        g.update_note(
+            &to_normalized.name,
+            PathBuf::from(ensure_markdown_extension(to_uri)),
+            moved_links,
+        );
+        for (path, content) in &rewritten {
+            let name = Path::new(path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            g.update_note(
+                &name,
+                PathBuf::from(path),
+                extract_linked_notes(content).into_iter().collect(),
+            );
+        }
+    }
 
     // Build response
     let backlinks_summary = if !backlinks_updated.is_empty() {
@@ -148,6 +181,36 @@ pub async fn execute<S: Storage>(
     );
 
     Ok(CallToolResult::success(vec![Content::text(text)]))
+}
+
+/// Rewrite wiki-links that point at a moved note.
+///
+/// Handles plain (`[[Name]]`), path-qualified (`[[folder/Name]]`), aliased
+/// (`[[Name|alias]]`), heading (`[[Name#h]]`) and embed (`![[Name]]`) forms.
+/// Path-qualified links are rewritten only when the source lived in a folder;
+/// plain links are rewritten only when the note's name changes, so a move
+/// between folders that keeps the name leaves `[[Name]]` alone.
+fn rewrite_wiki_links(
+    content: &str,
+    from_name: &str,
+    from_uri: &str,
+    to_name: &str,
+    to_uri: &str,
+) -> String {
+    let mut pairs: Vec<(&str, &str)> = Vec::new();
+    if from_uri.contains('/') && from_uri != to_uri {
+        pairs.push((from_uri, to_uri));
+    }
+    if from_name != to_name {
+        pairs.push((from_name, to_name));
+    }
+    let mut out = content.to_string();
+    for (old, new) in pairs {
+        for suffix in ["]]", "|", "#"] {
+            out = out.replace(&format!("[[{old}{suffix}"), &format!("[[{new}{suffix}"));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -352,5 +415,111 @@ mod tests {
         assert!(text.contains("Moved note"));
         assert!(!temp_dir.path().join("knowledge/My Note.md").exists());
         assert!(temp_dir.path().join("Renamed Note.md").exists());
+    }
+
+    async fn index(temp: &TempDir, graph: &Arc<RwLock<GraphIndex>>, rel: &str, content: &str) {
+        let full = temp.path().join(rel);
+        if let Some(parent) = full.parent() {
+            fs::create_dir_all(parent).await.unwrap();
+        }
+        fs::write(&full, content).await.unwrap();
+        let name = Path::new(rel)
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        graph.write().await.update_note(
+            &name,
+            PathBuf::from(rel),
+            extract_linked_notes(content).into_iter().collect(),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_move_between_directories_updates_path_qualified_links() {
+        let (temp_dir, storage, graph) = create_test_env().await;
+        index(&temp_dir, &graph, "architecture/Foo.md", "Foo body").await;
+        index(
+            &temp_dir,
+            &graph,
+            "Linker.md",
+            "See [[architecture/Foo]] and [[architecture/Foo|Foo doc]] and [[Foo]].",
+        )
+        .await;
+        fs::create_dir(temp_dir.path().join("knowledge"))
+            .await
+            .unwrap();
+
+        execute(
+            temp_dir.path(),
+            &storage,
+            &graph,
+            "architecture/Foo",
+            "knowledge/Foo",
+        )
+        .await
+        .expect("should succeed");
+
+        let linker = fs::read_to_string(temp_dir.path().join("Linker.md"))
+            .await
+            .unwrap();
+        assert_eq!(
+            linker,
+            "See [[knowledge/Foo]] and [[knowledge/Foo|Foo doc]] and [[Foo]]."
+        );
+        assert!(temp_dir.path().join("knowledge/Foo.md").exists());
+    }
+
+    #[tokio::test]
+    async fn test_move_updates_aliased_backlinks() {
+        let (temp_dir, storage, graph) = create_test_env().await;
+        index(&temp_dir, &graph, "Old.md", "Old body").await;
+        index(
+            &temp_dir,
+            &graph,
+            "A.md",
+            "[[Old|my alias]], [[Old#Heading]], ![[Old]], [[Older]]",
+        )
+        .await;
+
+        execute(temp_dir.path(), &storage, &graph, "Old", "New")
+            .await
+            .expect("should succeed");
+
+        let a = fs::read_to_string(temp_dir.path().join("A.md"))
+            .await
+            .unwrap();
+        assert_eq!(a, "[[New|my alias]], [[New#Heading]], ![[New]], [[Older]]");
+    }
+
+    #[tokio::test]
+    async fn test_move_updates_graph_immediately() {
+        let (temp_dir, storage, graph) = create_test_env().await;
+        index(&temp_dir, &graph, "Old.md", "Links to [[Other]]").await;
+        index(&temp_dir, &graph, "A.md", "Link to [[Old]]").await;
+
+        execute(temp_dir.path(), &storage, &graph, "Old", "New")
+            .await
+            .expect("should succeed");
+
+        let g = graph.read().await;
+        assert!(g.get_forward_links("Old.md").is_none());
+        let moved = g.get_forward_links("New.md").expect("moved note indexed");
+        assert!(moved.contains("Other"));
+        let back = g.get_backlinks("New").expect("backlinks to new name");
+        assert!(back.contains("A.md"));
+        assert!(g.get_backlinks("Old").map_or(true, |b| b.is_empty()));
+    }
+
+    #[test]
+    fn test_rewrite_keeps_plain_links_when_name_unchanged() {
+        let out = rewrite_wiki_links(
+            "[[Foo]] [[a/Foo]] [[a/Foobar]]",
+            "Foo",
+            "a/Foo",
+            "Foo",
+            "b/Foo",
+        );
+        assert_eq!(out, "[[Foo]] [[b/Foo]] [[a/Foobar]]");
     }
 }

@@ -31,7 +31,7 @@ pub fn open(app: &AppHandle) {
 
         let url = WebviewUrl::App("settings.html".into());
         let build_result = WebviewWindowBuilder::new(&app, SETTINGS_LABEL, url)
-            .title("Memory Settings")
+            .title("NotesSync Settings")
             .inner_size(480.0, 360.0)
             .resizable(false)
             .title_bar_style(TitleBarStyle::Overlay)

@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/target/release/memory /usr/local/bin/memory
+COPY --from=builder /build/target/release/notes /usr/local/bin/notes
 
 # Create non-root user (UID 1000 for consistency with the canonical image)
 RUN useradd -m -u 1000 memory
@@ -45,5 +45,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -sf http://localhost:3000/health || exit 1
 
-ENTRYPOINT ["memory"]
+ENTRYPOINT ["notes"]
 CMD ["up", "--vault", "/notes", "--listen", "0.0.0.0:3000"]

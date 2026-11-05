@@ -81,11 +81,11 @@ Important proxy considerations:
 ### CLI Commands
 
 ```
-memory mcp io --vault ~/notes                  # MCP stdio (launched by agent)
-memory mcp up --vault ~/notes                  # MCP HTTP server (localhost:3000)
-memory mcp up --vault ~/notes --listen 0.0.0.0:3000  # MCP HTTP on all interfaces
-memory sync up --vault ~/notes                 # Sync daemon only
-memory up --vault ~/notes                      # Both sync + MCP HTTP together
+notes mcp io --vault ~/notes                  # MCP stdio (launched by agent)
+notes mcp up --vault ~/notes                  # MCP HTTP server (localhost:3000)
+notes mcp up --vault ~/notes --listen 0.0.0.0:3000  # MCP HTTP on all interfaces
+notes sync up --vault ~/notes                 # Sync daemon only
+notes up --vault ~/notes                      # Both sync + MCP HTTP together
 ```
 
 The `--vault` flag specifies the path to your Obsidian vault and is required on each subcommand.
@@ -98,7 +98,7 @@ The server communicates over stdio and is designed to be launched by an MCP clie
 
 ```bash
 claude mcp add obsidian-memory --scope user \
-  -- memory mcp io --vault ~/notes
+  -- notes mcp io --vault ~/notes
 ```
 
 ### OpenCode Configuration
@@ -110,7 +110,7 @@ Add to `~/.config/opencode/opencode.json`:
   "mcp": {
     "obsidian-memory": {
       "type": "local",
-      "command": ["memory", "mcp", "io", "--vault", "~/notes"],
+      "command": ["notes", "mcp", "io", "--vault", "~/notes"],
       "enabled": true
     }
   }
