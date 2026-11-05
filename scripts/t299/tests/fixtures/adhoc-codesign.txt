@@ -1,0 +1,6 @@
+Executable=/fixture/Memory.app/Contents/MacOS/desktop
+Identifier=com.webdesserts.obsidian-memory
+Format=app bundle with Mach-O thin (arm64)
+CodeDirectory v=20400 size=123 flags=0x20002(adhoc,linker-signed) hashes=1+0 location=embedded
+Signature=adhoc
+TeamIdentifier=not set

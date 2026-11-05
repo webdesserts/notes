@@ -125,6 +125,8 @@ jobs:
         run: |
           if ! command -v cargo > /dev/null 2>&1; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            # GitHub supplies GITHUB_PATH as a single runner-controlled path.
+            # shellcheck disable=SC2086
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
       - name: "Install jq (for tokenizer optimization)"
@@ -166,7 +168,9 @@ jobs:
         # inconsistent syntax between shell and powershell.
         shell: bash
         run: |
-          # Parse out what we just built and upload it to scratch storage
+          # Parse out what we just built and upload it to scratch storage. These
+          # separate writes preserve GitHub's required multiline-output framing.
+          # shellcheck disable=SC2129
           echo "paths<<EOF" >> "$GITHUB_OUTPUT"
           dist print-upload-files-from-manifest --manifest dist-manifest.json >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
@@ -213,7 +217,9 @@ jobs:
           dist build ${{ needs.plan.outputs.tag-flag }} --output-format=json "--artifacts=global" > dist-manifest.json
           echo "dist ran successfully"
 
-          # Parse out what we just built and upload it to scratch storage
+          # Parse out what we just built and upload it to scratch storage. These
+          # separate writes preserve GitHub's required multiline-output framing.
+          # shellcheck disable=SC2129
           echo "paths<<EOF" >> "$GITHUB_OUTPUT"
           jq --raw-output ".upload_files[]" dist-manifest.json >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
@@ -288,9 +294,14 @@ jobs:
           ANNOUNCEMENT_BODY: "${{ fromJson(steps.host.outputs.manifest).announcement_github_body }}"
           RELEASE_COMMIT: "${{ github.sha }}"
         run: |
-          # Write and read notes from a file to avoid quoting breaking things
+          # Write and read notes from a file to avoid quoting breaking things.
+          # GitHub supplies RUNNER_TEMP as a single runner-controlled path.
+          # shellcheck disable=SC2086
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
 
+          # The optional flag is intentionally omitted when empty, and the
+          # artifact glob intentionally expands to individual upload paths.
+          # shellcheck disable=SC2086
           gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
 
   publish-homebrew-formula:
@@ -326,6 +337,8 @@ jobs:
 
           for release in $(echo "$PLAN" | jq --compact-output '.releases[] | select([.artifacts[] | endswith(".rb")] | any)'); do
             filename=$(echo "$release" | jq '.artifacts[] | select(endswith(".rb"))' --raw-output)
+            # The selected artifact is a .rb file; remove only that terminal suffix.
+            # shellcheck disable=SC2001
             name=$(echo "$filename" | sed "s/\.rb$//")
             version=$(echo "$release" | jq .app_version --raw-output)
 
@@ -356,46 +369,3 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
-
-  # Build + self-sign the desktop Tauri .dmg and attach it to the Release.
-  # This is intentionally NON-GATING: cargo-dist (the homebrew/CLI cut) is the
-  # must-ship, and a dmg hiccup must never block it. `continue-on-error: true`
-  # plus the fact that no cargo-dist job lists this job in `needs` keeps it
-  # decoupled; it hangs off `host` only so the Release exists before upload.
-  build-desktop-dmg:
-    name: build-desktop-dmg (aarch64-apple-darwin)
-    needs:
-      - host
-    runs-on: "macos-14"
-    continue-on-error: true
-    permissions:
-      "contents": "write"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          submodules: recursive
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Install tauri-cli
-        run: cargo install tauri-cli --version "^2" --locked
-      # `cargo tauri build` runs tauri.conf.json's beforeBuildCommand
-      # (npm ci + build in frontend/) to produce the gitignored frontend/dist,
-      # then bundles the .app + .dmg per bundle.targets ["app","dmg"].
-      - name: Bundle .app/.dmg
-        working-directory: crates/desktop
-        run: cargo tauri build
-      # Ad-hoc self-sign (no Developer ID, no notarization). Gatekeeper will
-      # show "unidentified developer" — users right-click → Open.
-      - name: Ad-hoc self-sign the .app
-        run: |
-          APP=$(ls -d target/release/bundle/macos/*.app)
-          codesign -s - --force --deep "$APP"
-          codesign --verify -vvv "$APP" || true
-      - name: Upload dmg to the GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          DMG=$(ls target/release/bundle/dmg/*.dmg | head -1)
-          gh release upload "$GITHUB_REF_NAME" "$DMG" --repo "$GITHUB_REPOSITORY" --clobber
