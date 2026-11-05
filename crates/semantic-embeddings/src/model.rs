@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use candle_core::{Device, Tensor};
 use candle_nn::VarBuilder;
+use sha2::{Digest, Sha256};
 
 #[cfg(feature = "debug")]
 use candle_core::IndexOp;
@@ -8,9 +9,38 @@ use candle_transformers::models::bert::{BertModel, Config};
 use std::sync::Mutex;
 use tokenizers::Tokenizer;
 
+/// Version tag for the model fingerprint scheme. Bump when the fingerprint
+/// inputs or their framing change.
+const MODEL_FINGERPRINT_VERSION: &str = "semantic-embeddings-model-v1";
+
+/// Compute a stable fingerprint over the exact model inputs (config JSON,
+/// tokenizer JSON, weights bytes). Two loaders fed equivalent inputs produce
+/// the same fingerprint regardless of whether the model came from disk or was
+/// embedded in the binary.
+fn compute_model_fingerprint(
+    config_json: &str,
+    tokenizer_json: &str,
+    model_weights: &[u8],
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(MODEL_FINGERPRINT_VERSION.as_bytes());
+    for input in [
+        config_json.as_bytes(),
+        tokenizer_json.as_bytes(),
+        model_weights,
+    ] {
+        // Length-prefix each input so concatenation is unambiguous.
+        hasher.update((input.len() as u64).to_le_bytes());
+        hasher.update(input);
+    }
+    hex::encode(hasher.finalize())
+}
+
 /// Model manager handles loading and inference with the sentence transformer model
 pub struct ModelManager {
     state: Mutex<Option<ModelState>>,
+    /// Fingerprint of the model inputs for the currently loaded model.
+    fingerprint: Mutex<Option<String>>,
 }
 
 struct ModelState {
@@ -29,7 +59,17 @@ impl ModelManager {
     pub fn new() -> Self {
         Self {
             state: Mutex::new(None),
+            fingerprint: Mutex::new(None),
         }
+    }
+
+    /// Read-only identity of the currently loaded model, if any.
+    ///
+    /// Derived from the exact config/tokenizer/weights inputs passed to
+    /// [`ModelManager::load_model`], so equivalent inputs always yield an
+    /// equivalent fingerprint.
+    pub fn model_fingerprint(&self) -> Option<String> {
+        self.fingerprint.lock().unwrap().clone()
     }
 
     /// Initialize the model with data provided from JavaScript
@@ -49,6 +89,8 @@ impl ModelManager {
         if state_guard.is_some() {
             return Ok(()); // Already loaded
         }
+
+        let fingerprint = compute_model_fingerprint(config_json, tokenizer_json, model_weights);
 
         // Use CPU for now (Metal/CUDA support can be added later)
         let device = Device::Cpu;
@@ -75,6 +117,7 @@ impl ModelManager {
             tokenizer,
             device,
         });
+        *self.fingerprint.lock().unwrap() = Some(fingerprint);
 
         Ok(())
     }

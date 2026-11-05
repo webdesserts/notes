@@ -117,6 +117,15 @@ impl SemanticEmbeddings {
         )
     }
 
+    /// Identity fingerprint of the currently loaded model, if any.
+    ///
+    /// Derived from the exact config/tokenizer/weights inputs, so embedded and
+    /// runtime-file loaders produce equivalent fingerprints for equivalent
+    /// inputs. Returns `None` before a model is loaded.
+    pub fn model_fingerprint(&self) -> Option<String> {
+        self.model.model_fingerprint()
+    }
+
     /// Encode a single text into an embedding vector.
     ///
     /// Returns a Vec<f32> of dimension 384 (for all-MiniLM-L6-v2).

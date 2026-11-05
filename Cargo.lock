@@ -6958,10 +6958,12 @@ dependencies = [
  "candle-transformers",
  "ctor 0.2.9",
  "env_logger",
+ "hex",
  "log",
  "once_cell",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokenizers",
  "toml 0.8.23",
 ]

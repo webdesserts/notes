@@ -360,20 +360,18 @@ async fn build_query_embedding(
         .map(|(_, embedding)| embedding.clone())
         .collect();
 
+    // The remaining text, else (when no seed resolved) the reference names.
+    let mut query_texts: Vec<String> = Vec::new();
     if !remaining_text.is_empty() {
-        vectors.push(
-            embeddings
-                .get_embedding("__query__", remaining_text)
-                .await?,
-        );
+        query_texts.push(remaining_text.to_string());
+    } else if vectors.is_empty() && !note_refs.is_empty() {
+        query_texts.push(note_refs.join(" "));
     }
 
-    if vectors.is_empty() && !note_refs.is_empty() {
-        vectors.push(
-            embeddings
-                .get_embedding("__query__", &note_refs.join(" "))
-                .await?,
-        );
+    // Query embeddings are encoded explicitly and never written to the note
+    // cache: they are ephemeral, not content-addressed by note path.
+    if !query_texts.is_empty() {
+        vectors.extend(embeddings.encode_query_texts(&query_texts).await?);
     }
 
     Ok(average(&vectors))
@@ -603,6 +601,35 @@ mod tests {
         assert_eq!(
             paths,
             vec!["projects/live.md", "knowledge/journal/notes.md"]
+        );
+    }
+
+    /// Query text (and the ref-name fallback) is encoded ephemerally: neither
+    /// path writes a `__query__` entry into the persisted note cache.
+    #[tokio::test]
+    async fn test_build_query_embedding_does_not_persist_queries() {
+        let vault = tempfile::tempdir().unwrap();
+        let manager = EmbeddingManager::new(vault.path());
+        manager.initialize().await.unwrap();
+
+        let text = build_query_embedding(&manager, &[], &[], &[], "keep tomatoes alive")
+            .await
+            .unwrap();
+        assert_eq!(text.map(|e| e.len()), Some(EMBEDDING_DIM));
+
+        let refs = vec!["Unresolved Note".to_string()];
+        let fallback = build_query_embedding(&manager, &[], &[], &refs, "")
+            .await
+            .unwrap();
+        assert_eq!(fallback.map(|e| e.len()), Some(EMBEDDING_DIM));
+
+        assert_eq!(manager.encoded_text_count(), 2);
+        assert!(
+            !vault
+                .path()
+                .join(".obsidian")
+                .join("memory-embedding-cache-v1.json")
+                .exists()
         );
     }
 
