@@ -95,7 +95,7 @@ def validate(dmg, version, config_path, runner=run):
     cfg = load_config(config_path)
     dmg = Path(dmg).absolute()
     require(re.fullmatch(VERSION, version), 'invalid version')
-    require(dmg.name == 'NotesSync_{}_aarch64.dmg'.format(version) and dmg.is_file() and not dmg.is_symlink(), 'missing or incorrectly named DMG')
+    require(dmg.name == 'NotesSync_{}_universal.dmg'.format(version) and dmg.is_file() and not dmg.is_symlink(), 'missing or incorrectly named DMG')
     # Do not recursively clean the owned directory if detach fails: it may be live.
     mount = Path(tempfile.mkdtemp(prefix='notes-sync-dmg-'))
     detached = False
@@ -115,7 +115,8 @@ def validate(dmg, version, config_path, runner=run):
             executable = inside(app / 'Contents/MacOS/desktop', mount)
             require(executable.is_file(), 'missing executable')
             arch = checked(runner, ['lipo', '-archs', str(executable)])
-            require(arch.stdout.strip() == 'arm64' and not arch.stderr.strip(), 'wrong architecture')
+            archs = arch.stdout.split()
+            require(len(archs) == 2 and set(archs) == {'x86_64', 'arm64'} and not arch.stderr.strip(), 'wrong architecture')
             with tempfile.TemporaryDirectory(prefix='notes-sync-public-cert-') as cert_dir:
                 prefix = Path(cert_dir) / 'signer'
                 checked(runner, ['codesign', '-d', '--extract-certificates=' + str(prefix), str(app)])
@@ -143,7 +144,7 @@ def validate(dmg, version, config_path, runner=run):
             # A real detach leaves an empty directory; fake runners may leave fixtures.
             if not any(mount.iterdir()):
                 mount.rmdir()
-    return dict(status='validated', version=version, arch='arm64', bundle_id=BUNDLE_ID,
+    return dict(status='validated', version=version, arch='universal', bundle_id=BUNDLE_ID,
                 asset=dmg.name, common_name=cfg['common_name'], der_sha256=cfg['der_sha256'],
                 der_hash_match=True, designated_requirement=cfg['designated_requirement'],
                 observations=observations, sha256=digest(dmg), size=dmg.stat().st_size)

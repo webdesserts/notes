@@ -23,7 +23,7 @@ TOKEN = 'notes-sync'
 QUALIFIED = 'webdesserts/tap/' + TOKEN
 CASK = 'Casks/' + TOKEN + '.rb'
 # Literal Homebrew interpolation, kept out of .format braces by concatenation.
-CASK_URL = 'https://github.com/' + REPOSITORY + '/releases/download/v#{version}/NotesSync_#{version}_aarch64.dmg'
+CASK_URL = 'https://github.com/' + REPOSITORY + '/releases/download/v#{version}/NotesSync_#{version}_universal.dmg'
 FLOORS = ('big_sur', 'monterey', 'ventura', 'sonoma', 'sequoia', 'tahoe')
 NONTERMINAL = ('queued', 'requested', 'waiting', 'pending', 'in_progress')
 STABLE_VERSION = r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
@@ -42,7 +42,7 @@ def version(tag):
 
 
 def asset_url(tag):
-    return 'https://github.com/{}/releases/download/{}/NotesSync_{}_aarch64.dmg'.format(REPOSITORY, tag, version(tag))
+    return 'https://github.com/{}/releases/download/{}/NotesSync_{}_universal.dmg'.format(REPOSITORY, tag, version(tag))
 
 
 def resolved_cask_source_path(value, tap):
@@ -63,7 +63,6 @@ def generate(tag, sha256, macos_floor):
   desc "Desktop companion for NotesSync"
   homepage "https://github.com/webdesserts/notes"
 
-  depends_on arch: :arm64
   depends_on macos: :{floor}
 
   app "NotesSync.app"
@@ -220,7 +219,7 @@ def _validate_fetched_artifact(cache, tag, sha256, signer_config, validator, run
     require(cache.is_file() and digest(cache) == expected, 'fetched artifact changed before signer validation')
     # Homebrew cache names need not satisfy the validator's exact asset contract.
     with tempfile.TemporaryDirectory(prefix='notes-sync-cask-artifact-') as directory:
-        dmg = Path(directory) / ('NotesSync_{}_aarch64.dmg'.format(version(tag)))
+        dmg = Path(directory) / ('NotesSync_{}_universal.dmg'.format(version(tag)))
         shutil.copyfile(cache, dmg)
         require(digest(dmg) == expected and digest(cache) == expected, 'fetched artifact copy SHA mismatch')
         result = validator(dmg, version(tag), signer_config, runner=runner)

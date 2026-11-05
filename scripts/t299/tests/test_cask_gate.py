@@ -105,7 +105,7 @@ class CandidateTests(unittest.TestCase):
         return gate.validate(self.tap, 'v0.5.8', self.sha, 'sonoma', runner=self.runner, **kw)
 
     def artifact_validator(self, dmg, version, config_path, runner):
-        self.assertEqual(dmg.name, 'NotesSync_0.5.8_aarch64.dmg')
+        self.assertEqual(dmg.name, 'NotesSync_0.5.8_universal.dmg')
         self.assertNotEqual(dmg.parent, self.cache.parent)
         self.assertTrue(dmg.parent.name.startswith('notes-sync-cask-artifact-'))
         self.assertFalse(dmg.is_symlink())
@@ -130,12 +130,11 @@ class CandidateTests(unittest.TestCase):
         expected = ('cask "notes-sync" do\n'
                     '  version "0.5.8"\n'
                     '  sha256 "' + self.sha + '"\n\n'
-                    '  url "https://github.com/webdesserts/notes/releases/download/v#{version}/NotesSync_#{version}_aarch64.dmg"\n'
+                    '  url "https://github.com/webdesserts/notes/releases/download/v#{version}/NotesSync_#{version}_universal.dmg"\n'
                     '  name "NotesSync"\n'
                     '  desc "Desktop companion for NotesSync"\n'
                     '  homepage "https://github.com/webdesserts/notes"\n\n'
-                    '  depends_on arch: :arm64\n'
-                    '  depends_on macos: :sonoma\n\n'
+                                        '  depends_on macos: :sonoma\n\n'
                     '  app "NotesSync.app"\n\n'
                     '  caveats <<~EOS\n'
                     '    NotesSync is self-signed, not Apple-notarized. On first launch, macOS may block it.\n'
@@ -523,7 +522,7 @@ class CandidateTests(unittest.TestCase):
             self.assertFalse(fixture.mount.exists())
             attach = next(argv for argv in fixture.calls if argv[:2] == ['hdiutil', 'attach'])
             copied = Path(attach[-1])
-            self.assertEqual(copied.name, 'NotesSync_0.5.8_aarch64.dmg')
+            self.assertEqual(copied.name, 'NotesSync_0.5.8_universal.dmg')
             self.assertFalse(copied.parent.exists())
 
     def test_publish_newer_success_cask_only(self):

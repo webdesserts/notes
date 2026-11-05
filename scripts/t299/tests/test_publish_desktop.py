@@ -49,12 +49,12 @@ class PublisherTests(unittest.TestCase):
             self.assertEqual(json.loads(self.override.read_text()), {'build': {'beforeBuildCommand': ''}})
             self.assertEqual(kwargs['cwd'], self.root / 'crates/desktop')
             self.assertEqual(kwargs['env']['APPLE_SIGNING_IDENTITY'], 'ObsidianMemory Dev Signing')
-            self.assertEqual(argv[:7], ['cargo', 'tauri', 'build', '--target', 'aarch64-apple-darwin', '--bundles', 'dmg'])
+            self.assertEqual(argv[:7], ['cargo', 'tauri', 'build', '--target', 'universal-apple-darwin', '--bundles', 'dmg'])
             artifact = pub.artifact_path(self.root, '0.5.7')
             artifact.parent.mkdir(parents=True, exist_ok=True)
             artifact.write_bytes(b'final dmg')
         elif argv[:3] == ['gh', 'release', 'view']:
-            out = json.dumps({'tagName': 'v0.5.7', 'assets': [{'name': 'NotesSync_0.5.7_aarch64.dmg'}] if self.existing else []})
+            out = json.dumps({'tagName': 'v0.5.7', 'assets': [{'name': 'NotesSync_0.5.7_universal.dmg'}] if self.existing else []})
         if self.fail and self.fail in argv:
             code = 99
         return subprocess.CompletedProcess(argv, code, out, '')

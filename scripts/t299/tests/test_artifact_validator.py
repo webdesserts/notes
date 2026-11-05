@@ -28,7 +28,7 @@ class FixtureRunner:
         self.calls = []
         self.fail = None
         self.metadata = {}
-        self.arch = 'arm64'
+        self.arch = 'x86_64 arm64'
         self.certificates = 1
         self.details = 'Authority=ObsidianMemory Dev Signing\nSignature size=123\n'
         self.dr = 'designated => ' + DR
@@ -82,7 +82,7 @@ class ValidatorTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix='validator tests ')
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.dmg = self.root / 'NotesSync_0.5.7_aarch64.dmg'
+        self.dmg = self.root / 'NotesSync_0.5.7_universal.dmg'
         self.dmg.write_bytes(b'fixture dmg')
         self.cfg = self.root / 'fixture.json'
         self.settings = config()
@@ -134,7 +134,7 @@ class ValidatorTests(unittest.TestCase):
                 with self.assertRaises(av.ValidationError):
                     self.validate()
         self.runner.metadata = {}
-        for arch in ['x86_64', 'arm64 x86_64', 'arm64e']:
+        for arch in ['x86_64', 'arm64', 'arm64e', 'arm64 arm64', 'x86_64 arm64e', 'x86_64 arm64 arm64e']:
             self.runner.arch = arch
             with self.assertRaises(av.ValidationError):
                 self.validate()

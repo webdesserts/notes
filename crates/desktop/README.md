@@ -100,7 +100,8 @@ Once the cask is visible in the tap, install it with:
 brew install --cask webdesserts/tap/notes-sync
 ```
 
-The cask targets **arm64** and declares macOS **Tahoe** as its conservative
+The cask ships a **universal** (`x86_64` + `arm64`) DMG, so it installs on both
+Intel and Apple Silicon Macs, and declares macOS **Sonoma** as its conservative
 support floor. The recorded smoke ran on macOS 26.6.2; that single-host result is
 not proof of compatibility with every newer release. Normal GUI launch also
 requires a persisted vault path in `app-settings.json`; the app does not yet

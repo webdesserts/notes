@@ -13,11 +13,11 @@ from artifact_validator import (VERSION, ValidationError, digest, load_config,
 TAURI_CLI_VERSION = '2.11.4'
 SIGNING_IDENTITY = 'ObsidianMemory Dev Signing'
 REPOSITORY = 'webdesserts/notes'
-TARGET = 'aarch64-apple-darwin'
+TARGET = 'universal-apple-darwin'
 
 
 def artifact_path(source, version):
-    return source / 'target' / TARGET / 'release/bundle/dmg' / ('NotesSync_{}_aarch64.dmg'.format(version))
+    return source / 'target' / TARGET / 'release/bundle/dmg' / ('NotesSync_{}_universal.dmg'.format(version))
 
 
 def local_environment():

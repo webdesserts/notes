@@ -58,7 +58,7 @@ jobs:
           generate(tag, expected, os.environ['MACOS_FLOOR'])
           config = Path('tooling/scripts/t299/signer_config.json')
           load_config(config)  # Reviewed public values; never derive identity from the artifact.
-          artifact = Path(os.environ['RUNNER_TEMP']) / ('NotesSync_' + version(tag) + '_aarch64.dmg')
+          artifact = Path(os.environ['RUNNER_TEMP']) / ('NotesSync_' + version(tag) + '_universal.dmg')
           with urllib.request.urlopen(asset_url(tag), timeout=120) as response, artifact.open('xb') as output:
               shutil.copyfileobj(response, output)
           require(digest(artifact) == expected, 'downloaded SHA differs from pre-upload receipt')
