@@ -18,12 +18,12 @@ import tempfile
 import artifact_validator
 from artifact_validator import ValidationError, digest, require, run
 
-REPOSITORY = 'webdesserts/obsidian-memory'
-TOKEN = 'webdesserts-memory'
+REPOSITORY = 'webdesserts/notes'
+TOKEN = 'notes-sync'
 QUALIFIED = 'webdesserts/tap/' + TOKEN
 CASK = 'Casks/' + TOKEN + '.rb'
 # Literal Homebrew interpolation, kept out of .format braces by concatenation.
-CASK_URL = 'https://github.com/' + REPOSITORY + '/releases/download/v#{version}/Memory_#{version}_aarch64.dmg'
+CASK_URL = 'https://github.com/' + REPOSITORY + '/releases/download/v#{version}/NotesSync_#{version}_aarch64.dmg'
 FLOORS = ('big_sur', 'monterey', 'ventura', 'sonoma', 'sequoia', 'tahoe')
 NONTERMINAL = ('queued', 'requested', 'waiting', 'pending', 'in_progress')
 STABLE_VERSION = r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
@@ -42,7 +42,7 @@ def version(tag):
 
 
 def asset_url(tag):
-    return 'https://github.com/{}/releases/download/{}/Memory_{}_aarch64.dmg'.format(REPOSITORY, tag, version(tag))
+    return 'https://github.com/{}/releases/download/{}/NotesSync_{}_aarch64.dmg'.format(REPOSITORY, tag, version(tag))
 
 
 def resolved_cask_source_path(value, tap):
@@ -54,22 +54,22 @@ def generate(tag, sha256, macos_floor):
     value = version(tag)
     require(isinstance(sha256, str) and re.fullmatch('[0-9a-fA-F]{64}', sha256), '64hex artifact digest required')
     require(macos_floor in FLOORS, 'explicit reviewed supported macOS floor required')
-    return '''cask "webdesserts-memory" do
+    return '''cask "notes-sync" do
   version "{version}"
   sha256 "{sha256}"
 
   url "{url}"
-  name "Memory"
-  desc "Desktop companion for Obsidian memory"
-  homepage "https://github.com/webdesserts/obsidian-memory"
+  name "NotesSync"
+  desc "Desktop companion for NotesSync"
+  homepage "https://github.com/webdesserts/notes"
 
   depends_on arch: :arm64
   depends_on macos: :{floor}
 
-  app "Memory.app"
+  app "NotesSync.app"
 
   caveats <<~EOS
-    Memory is self-signed, not Apple-notarized. On first launch, macOS may block it.
+    NotesSync is self-signed, not Apple-notarized. On first launch, macOS may block it.
     After verifying the release, approve it once in System Settings > Privacy & Security > Open Anyway.
     Never approve an unexpected warning. An upgrade may require approval again.
     The macOS floor is a reviewed support policy, not proof on every newer macOS release.
@@ -167,7 +167,7 @@ def candidate_gates(tap, tag, sha256, runner):
         # Only the exact no-color no-match diagnostic or an exact own-tap result
         # is understood; every other exit code or diagnostic is a collision or
         # lookup failure, never availability. No text is stripped or normalized.
-        if result.returncode == 1 and result.stdout == '' and result.stderr == 'Error: No formulae or casks found for "/^webdesserts-memory$/".\n':
+        if result.returncode == 1 and result.stdout == '' and result.stderr == 'Error: No formulae or casks found for "/^notes-sync$/".\n':
             tokens = []
         else:
             require(result.returncode == 0 and result.stderr == '', 'cask token collision lookup failed unexpectedly')
@@ -219,8 +219,8 @@ def _validate_fetched_artifact(cache, tag, sha256, signer_config, validator, run
     expected = sha256.lower()
     require(cache.is_file() and digest(cache) == expected, 'fetched artifact changed before signer validation')
     # Homebrew cache names need not satisfy the validator's exact asset contract.
-    with tempfile.TemporaryDirectory(prefix='memory-cask-artifact-') as directory:
-        dmg = Path(directory) / ('Memory_{}_aarch64.dmg'.format(version(tag)))
+    with tempfile.TemporaryDirectory(prefix='notes-sync-cask-artifact-') as directory:
+        dmg = Path(directory) / ('NotesSync_{}_aarch64.dmg'.format(version(tag)))
         shutil.copyfile(cache, dmg)
         require(digest(dmg) == expected and digest(cache) == expected, 'fetched artifact copy SHA mismatch')
         result = validator(dmg, version(tag), signer_config, runner=runner)
@@ -278,7 +278,7 @@ def publish(tap, tag, sha256, macos_floor, *, run_id, signer_config=None, runner
     require(capture_baseline(tap, candidate, runner)[0] == head and (tap / CASK).read_bytes() == candidate.encode(), 'local baseline or candidate changed before staging')
     try:
         checked(runner, ['git', 'add', '--', CASK], cwd=tap)
-        checked(runner, ['git', '-c', 'user.name=Memory cask publisher', '-c', 'user.email=memory-cask@users.noreply.github.com', 'commit', '-m', TOKEN + ' ' + version(tag)], cwd=tap)
+        checked(runner, ['git', '-c', 'user.name=NotesSync cask publisher', '-c', 'user.email=notes-sync-cask@users.noreply.github.com', 'commit', '-m', TOKEN + ' ' + version(tag)], cwd=tap)
         commit = read_git(tap, runner, 'rev-parse', '--verify', 'HEAD').strip()
     except (ValidationError, OSError):
         return dict(receipt, status='publication_failed', local='staging_or_commit_may_exist', remote='not_attempted')

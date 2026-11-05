@@ -17,7 +17,7 @@ from test_artifact_validator import config as signer_fixture, FixtureRunner
 
 class CandidateTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='memory-cask-test-')
+        self.temp = tempfile.TemporaryDirectory(prefix='notes-sync-cask-test-')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.tap = self.root / 'tap'
@@ -94,7 +94,7 @@ class CandidateTests(unittest.TestCase):
             return result(str(self.cache) + '\n')
         if argv[:2] == ['brew', 'search']:
             if self.command_failure == 'collision':
-                return result('other/tap/webdesserts-memory\n')
+                return result('other/tap/notes-sync\n')
             out, err, code = self.search_output
             return result(out, err, code)
         if argv[0] in ('brew', 'ruby'):
@@ -105,9 +105,9 @@ class CandidateTests(unittest.TestCase):
         return gate.validate(self.tap, 'v0.5.8', self.sha, 'sonoma', runner=self.runner, **kw)
 
     def artifact_validator(self, dmg, version, config_path, runner):
-        self.assertEqual(dmg.name, 'Memory_0.5.8_aarch64.dmg')
+        self.assertEqual(dmg.name, 'NotesSync_0.5.8_aarch64.dmg')
         self.assertNotEqual(dmg.parent, self.cache.parent)
-        self.assertTrue(dmg.parent.name.startswith('memory-cask-artifact-'))
+        self.assertTrue(dmg.parent.name.startswith('notes-sync-cask-artifact-'))
         self.assertFalse(dmg.is_symlink())
         self.assertEqual(dmg.read_bytes(), self.cache.read_bytes())
         self.assertEqual(version, '0.5.8')
@@ -127,25 +127,25 @@ class CandidateTests(unittest.TestCase):
         self.assertEqual(self.git('rev-parse', 'HEAD').stdout.strip(), self.baseline)
 
     def test_generation_exact_and_required_inputs(self):
-        expected = ('cask "webdesserts-memory" do\n'
+        expected = ('cask "notes-sync" do\n'
                     '  version "0.5.8"\n'
                     '  sha256 "' + self.sha + '"\n\n'
-                    '  url "https://github.com/webdesserts/obsidian-memory/releases/download/v#{version}/Memory_#{version}_aarch64.dmg"\n'
-                    '  name "Memory"\n'
-                    '  desc "Desktop companion for Obsidian memory"\n'
-                    '  homepage "https://github.com/webdesserts/obsidian-memory"\n\n'
+                    '  url "https://github.com/webdesserts/notes/releases/download/v#{version}/NotesSync_#{version}_aarch64.dmg"\n'
+                    '  name "NotesSync"\n'
+                    '  desc "Desktop companion for NotesSync"\n'
+                    '  homepage "https://github.com/webdesserts/notes"\n\n'
                     '  depends_on arch: :arm64\n'
                     '  depends_on macos: :sonoma\n\n'
-                    '  app "Memory.app"\n\n'
+                    '  app "NotesSync.app"\n\n'
                     '  caveats <<~EOS\n'
-                    '    Memory is self-signed, not Apple-notarized. On first launch, macOS may block it.\n'
+                    '    NotesSync is self-signed, not Apple-notarized. On first launch, macOS may block it.\n'
                     '    After verifying the release, approve it once in System Settings > Privacy & Security > Open Anyway.\n'
                     '    Never approve an unexpected warning. An upgrade may require approval again.\n'
                     '    The macOS floor is a reviewed support policy, not proof on every newer macOS release.\n'
                     '  EOS\n'
                     'end\n')
         self.assertEqual(gate.generate('v0.5.8', self.sha, 'sonoma'), expected)
-        self.assertNotIn('v0.5.8/Memory_0.5.8', expected)
+        self.assertNotIn('v0.5.8/NotesSync_0.5.8', expected)
         self.assertNotIn('no_check', gate.generate('v0.5.8', self.sha, 'tahoe'))
         self.assertIn('depends_on macos: :tahoe', gate.generate('v0.5.8', self.sha, 'tahoe'))
         for tag, sha, floor in [('v0.5.8', self.sha, ''), ('v0.5.8', self.sha, 'invented'), ('v0.5.8', 'bad', 'sonoma'), ('latest', self.sha, 'sonoma')]:
@@ -283,7 +283,7 @@ class CandidateTests(unittest.TestCase):
         self.unqualified_info_override = None
 
     def test_collision_search_accepts_only_exact_no_color_no_match(self):
-        no_match = 'Error: No formulae or casks found for "/^webdesserts-memory$/".\n'
+        no_match = 'Error: No formulae or casks found for "/^notes-sync$/".\n'
         self.search_output = ('', no_match, 1)
         self.assertEqual(self.validate()['status'], 'validated')
         for out, err, code in [
@@ -292,7 +292,7 @@ class CandidateTests(unittest.TestCase):
             ('', no_match.rstrip('\n'), 1),
             ('', '', 1),
             ('', 'Error: something else\n', 1),
-            ('webdesserts-memory\n', no_match, 1),
+            ('notes-sync\n', no_match, 1),
             ('', no_match, 2),
             (gate.QUALIFIED + '\n', 'warning on success\n', 0),
         ]:
@@ -523,7 +523,7 @@ class CandidateTests(unittest.TestCase):
             self.assertFalse(fixture.mount.exists())
             attach = next(argv for argv in fixture.calls if argv[:2] == ['hdiutil', 'attach'])
             copied = Path(attach[-1])
-            self.assertEqual(copied.name, 'Memory_0.5.8_aarch64.dmg')
+            self.assertEqual(copied.name, 'NotesSync_0.5.8_aarch64.dmg')
             self.assertFalse(copied.parent.exists())
 
     def test_publish_newer_success_cask_only(self):

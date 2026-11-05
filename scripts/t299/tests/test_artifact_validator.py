@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import artifact_validator as av
 
 CERT = b'fixture public DER bytes, not a real certificate'
-DR = 'identifier "com.webdesserts.obsidian-memory" and certificate leaf = H"fixture"'
+DR = 'identifier "com.webdesserts.notes-sync" and certificate leaf = H"fixture"'
 
 
 def config():
@@ -40,7 +40,7 @@ class FixtureRunner:
         if argv[:2] == ['hdiutil', 'attach']:
             self.mount = Path(argv[argv.index('-mountpoint') + 1])
             self.cleanup_mount(self.mount)
-            app = self.mount / 'Memory.app/Contents'
+            app = self.mount / 'NotesSync.app/Contents'
             (app / 'MacOS').mkdir(parents=True)
             (app / 'MacOS/desktop').write_bytes(b'fixture executable')
             info = dict(CFBundleIdentifier=av.BUNDLE_ID, CFBundleShortVersionString='0.5.7', CFBundleExecutable='desktop')
@@ -51,7 +51,7 @@ class FixtureRunner:
             assert argv[-1] == str(self.mount)
             self.mounted = False
             if self.fail != 'detach':
-                shutil.rmtree(self.mount / 'Memory.app')
+                shutil.rmtree(self.mount / 'NotesSync.app')
         else:
             assert self.mounted
             assert str(self.mount) in argv[-1]
@@ -82,7 +82,7 @@ class ValidatorTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix='validator tests ')
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.dmg = self.root / 'Memory_0.5.7_aarch64.dmg'
+        self.dmg = self.root / 'NotesSync_0.5.7_aarch64.dmg'
         self.dmg.write_bytes(b'fixture dmg')
         self.cfg = self.root / 'fixture.json'
         self.settings = config()
@@ -116,7 +116,7 @@ class ValidatorTests(unittest.TestCase):
         self.assertEqual(len(options), 1)
         self.assertNotEqual(options[0], '--extract-certificates=')
         self.assertNotIn('--extract-certificates', call)
-        self.assertEqual(call[-1], str(self.runner.mount / 'Memory.app'))
+        self.assertEqual(call[-1], str(self.runner.mount / 'NotesSync.app'))
 
     def test_identity_mismatches(self):
         for field, value in [('common_name', 'Other'), ('der_sha256', '0'*64), ('designated_requirement', DR + ' and false')]:
@@ -181,7 +181,7 @@ class ValidatorTests(unittest.TestCase):
 
     def test_classifier_exact_exit_streams_and_unknown(self):
         record = config()['observations']['spctl']
-        app = self.root / 'mount with spaces/Memory.app'
+        app = self.root / 'mount with spaces/NotesSync.app'
         good = subprocess.CompletedProcess([], 3, '', str(app) + ': rejected: fixture self-signed')
         self.assertEqual(av.classify(good, record, app), 'expected_preapproval')
         for code, out, err in [(0, '', good.stderr), (3, good.stderr, ''), (3, '', 'unknown'), (3, '', good.stderr+'\ninternal error'), (3, '', good.stderr+'; unknown internal error'), (3, '', 'prefix '+good.stderr), (3, '', ' '+good.stderr), (3, '', good.stderr+' '), (3, '', good.stderr+'\n\n'), (3, '', 'x'*9000), (3, '', good.stderr.replace('mount with spaces', 'other mount'))]:
@@ -189,7 +189,7 @@ class ValidatorTests(unittest.TestCase):
                 av.classify(subprocess.CompletedProcess([], code, out, err), record, app)
 
     def test_classifier_order_and_line_endings(self):
-        app = self.root / 'mount with spaces/Memory.app'
+        app = self.root / 'mount with spaces/NotesSync.app'
         record = dict(exit_code=3, stdout_lines=['first', 'second: {path}'], stderr_lines=['rejected'])
         for separator in ['\n', '\r\n', '\r']:
             result = subprocess.CompletedProcess([], 3, separator.join(['first', 'second: '+str(app)])+separator, 'rejected'+separator)
@@ -199,7 +199,7 @@ class ValidatorTests(unittest.TestCase):
                 av.classify(subprocess.CompletedProcess([], 3, '\n'.join(lines), 'rejected'), record, app)
 
     def test_classifier_rejects_raw_controls_before_line_normalization(self):
-        app = self.root / 'mount with spaces/Memory.app'
+        app = self.root / 'mount with spaces/NotesSync.app'
         controls = [chr(code) for code in range(32) if code not in [10, 13]]
         controls += [chr(code) for code in range(127, 160)] + ['\u2028', '\u2029']
         for stream in ['stdout', 'stderr']:
@@ -225,7 +225,7 @@ class ValidatorTests(unittest.TestCase):
 
     def test_invalid_classifier_path_rejected(self):
         record = config()['observations']['spctl']
-        for app in ['relative/Memory.app', '/tmp/../Memory.app', '/tmp/Other.app', '/tmp/bad\npath/Memory.app']:
+        for app in ['relative/NotesSync.app', '/tmp/../NotesSync.app', '/tmp/Other.app', '/tmp/bad\npath/NotesSync.app']:
             result = subprocess.CompletedProcess([], 3, '', app + ': rejected: fixture self-signed')
             with self.subTest(app=app), self.assertRaises(av.ValidationError):
                 av.classify(result, record, app)

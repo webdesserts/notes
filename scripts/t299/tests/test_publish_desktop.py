@@ -54,7 +54,7 @@ class PublisherTests(unittest.TestCase):
             artifact.parent.mkdir(parents=True, exist_ok=True)
             artifact.write_bytes(b'final dmg')
         elif argv[:3] == ['gh', 'release', 'view']:
-            out = json.dumps({'tagName': 'v0.5.7', 'assets': [{'name': 'Memory_0.5.7_aarch64.dmg'}] if self.existing else []})
+            out = json.dumps({'tagName': 'v0.5.7', 'assets': [{'name': 'NotesSync_0.5.7_aarch64.dmg'}] if self.existing else []})
         if self.fail and self.fail in argv:
             code = 99
         return subprocess.CompletedProcess(argv, code, out, '')

@@ -12,12 +12,12 @@ from artifact_validator import (VERSION, ValidationError, digest, load_config,
 
 TAURI_CLI_VERSION = '2.11.4'
 SIGNING_IDENTITY = 'ObsidianMemory Dev Signing'
-REPOSITORY = 'webdesserts/obsidian-memory'
+REPOSITORY = 'webdesserts/notes'
 TARGET = 'aarch64-apple-darwin'
 
 
 def artifact_path(source, version):
-    return source / 'target' / TARGET / 'release/bundle/dmg' / ('Memory_{}_aarch64.dmg'.format(version))
+    return source / 'target' / TARGET / 'release/bundle/dmg' / ('NotesSync_{}_aarch64.dmg'.format(version))
 
 
 def local_environment():
@@ -54,7 +54,7 @@ def build_and_validate(source, tag, config_path, runner, validator):
     checked(runner, ['npm', 'run', 'build'], frontend, env)
     signing_env = dict(env, APPLE_SIGNING_IDENTITY=SIGNING_IDENTITY, CARGO_TARGET_DIR=str(source / 'target'))
     # Avoid Tauri's shell hook and duplicate frontend builds in historical checkouts.
-    with tempfile.TemporaryDirectory(prefix='memory-tauri-config-') as temp:
+    with tempfile.TemporaryDirectory(prefix='notes-sync-tauri-config-') as temp:
         override = Path(temp) / 'tauri-override.json'
         override.write_text(json.dumps({'build': {'beforeBuildCommand': ''}}))
         checked(runner, ['cargo', 'tauri', 'build', '--target', TARGET, '--bundles', 'dmg', '--config', str(override)], source / 'crates/desktop', signing_env)

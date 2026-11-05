@@ -1,4 +1,4 @@
-"""Read-only, probe-configured validation of the final self-signed Memory DMG."""
+"""Read-only, probe-configured validation of the final self-signed NotesSync DMG."""
 import argparse
 import hashlib
 import json
@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 
-BUNDLE_ID = 'com.webdesserts.obsidian-memory'
+BUNDLE_ID = 'com.webdesserts.notes-sync'
 VERSION = r'[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?'
 MAX_OUTPUT = 8192
 
@@ -57,7 +57,7 @@ def load_config(path):
 
 def classify(result, record, app_path):
     path = str(app_path)
-    require(Path(path).is_absolute() and Path(path).name == 'Memory.app' and
+    require(Path(path).is_absolute() and Path(path).name == 'NotesSync.app' and
             '..' not in Path(path).parts and len(path) <= 4096 and
             not re.search(r'[\x00-\x1f\x7f-\x9f\u2028\u2029]', path), 'invalid observation app path')
     require(result.returncode == record['exit_code'], 'unknown observation exit code')
@@ -95,14 +95,14 @@ def validate(dmg, version, config_path, runner=run):
     cfg = load_config(config_path)
     dmg = Path(dmg).absolute()
     require(re.fullmatch(VERSION, version), 'invalid version')
-    require(dmg.name == 'Memory_{}_aarch64.dmg'.format(version) and dmg.is_file() and not dmg.is_symlink(), 'missing or incorrectly named DMG')
+    require(dmg.name == 'NotesSync_{}_aarch64.dmg'.format(version) and dmg.is_file() and not dmg.is_symlink(), 'missing or incorrectly named DMG')
     # Do not recursively clean the owned directory if detach fails: it may be live.
-    mount = Path(tempfile.mkdtemp(prefix='memory-dmg-'))
+    mount = Path(tempfile.mkdtemp(prefix='notes-sync-dmg-'))
     detached = False
     try:
         try:
             checked(runner, ['hdiutil', 'attach', '-readonly', '-nobrowse', '-mountpoint', str(mount), str(dmg)])
-            app = inside(mount / 'Memory.app', mount)
+            app = inside(mount / 'NotesSync.app', mount)
             info_path = inside(app / 'Contents/Info.plist', mount)
             require(info_path.is_file(), 'missing Info.plist')
             try:
@@ -116,7 +116,7 @@ def validate(dmg, version, config_path, runner=run):
             require(executable.is_file(), 'missing executable')
             arch = checked(runner, ['lipo', '-archs', str(executable)])
             require(arch.stdout.strip() == 'arm64' and not arch.stderr.strip(), 'wrong architecture')
-            with tempfile.TemporaryDirectory(prefix='memory-public-cert-') as cert_dir:
+            with tempfile.TemporaryDirectory(prefix='notes-sync-public-cert-') as cert_dir:
                 prefix = Path(cert_dir) / 'signer'
                 checked(runner, ['codesign', '-d', '--extract-certificates=' + str(prefix), str(app)])
                 certs = list(Path(cert_dir).iterdir())
