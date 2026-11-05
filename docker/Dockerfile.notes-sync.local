@@ -11,8 +11,8 @@ FROM rust:bookworm AS builder
 
 WORKDIR /build
 
-# notes-sync has path dependencies on other workspace crates (wiki-links,
-# obsidian-fs, notes-core, etc.), so `cargo build -p notes-sync` needs the whole
+# notes-sync has path dependencies on other workspace crates (notes-core,
+# sync-daemon, semantic-embeddings, etc.), so `cargo build -p notes-sync` needs the whole
 # workspace to resolve. See .dockerignore for exclusions (target/, .git/).
 COPY . .
 

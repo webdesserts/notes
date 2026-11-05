@@ -1,4 +1,4 @@
-use obsidian_fs::{
+use notes_core::note_ref::{
     NoteRef, ensure_markdown_extension, generate_search_paths, normalize_note_reference,
 };
 use rmcp::model::{CallToolResult, Content, ErrorData};

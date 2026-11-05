@@ -11,6 +11,7 @@
 //! - Self-edits (client's own writes don't invalidate their whitelist entry)
 //! - External edits (hash mismatch triggers re-read requirement)
 
+use notes_core::wiki_links::extract_linked_notes;
 use notify::RecommendedWatcher;
 use notify_debouncer_mini::{DebouncedEventKind, Debouncer, new_debouncer};
 use std::collections::{HashMap, HashSet};
@@ -18,7 +19,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::{RwLock, mpsc};
-use wiki_links::extract_linked_notes;
 
 use crate::embeddings::EmbeddingManager;
 use crate::graph::GraphIndex;

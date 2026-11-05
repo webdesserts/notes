@@ -2,7 +2,7 @@
 //! (frontmatter, preamble, and heading-delimited sections) and extracts a
 //! single section's raw content by its line range.
 
-use obsidian_fs::split_frontmatter;
+use crate::frontmatter::split_frontmatter;
 
 use super::heading;
 use super::heading::parse_headings;

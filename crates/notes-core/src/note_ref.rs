@@ -1,16 +1,5 @@
-//! Path resolution and frontmatter parsing utilities for Obsidian notes
-//!
-//! Handles note path resolution, normalization, search path generation,
-//! and YAML frontmatter parsing. These are pure functions with no I/O -
-//! actual filesystem operations stay in the TypeScript layer (or future
-//! Rust MCP server).
-
-mod frontmatter;
-
-pub use frontmatter::{
-    Frontmatter, FrontmatterError, ParsedNote, build_note_with_frontmatter, parse_frontmatter,
-    serialize_frontmatter, split_frontmatter,
-};
+//! Note references and vault-relative paths: note lookup, normalization,
+//! search path generation, and path validation. Pure functions with no I/O.
 
 use serde::{Deserialize, Serialize};
 

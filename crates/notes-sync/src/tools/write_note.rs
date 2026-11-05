@@ -3,7 +3,7 @@
 //! One tool, mode selected by the hash: whole-note or whole-section, create
 //! or overwrite. See [`execute_scoped`] for the full truth table.
 
-use obsidian_fs::ensure_markdown_extension;
+use notes_core::note_ref::ensure_markdown_extension;
 use rmcp::model::{CallToolResult, Content, ErrorData};
 use serde::Serialize;
 use std::path::Path;

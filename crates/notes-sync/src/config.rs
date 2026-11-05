@@ -12,7 +12,7 @@ pub struct Config {
 impl Config {
     /// Create configuration from a vault path (with tilde expansion).
     pub fn new(vault_path: &str) -> Self {
-        let vault_path = memory_common::expand_tilde(vault_path);
+        let vault_path = notes_core::runtime::expand_tilde(vault_path);
         let vault_name = vault_path
             .file_name()
             .and_then(|n| n.to_str())

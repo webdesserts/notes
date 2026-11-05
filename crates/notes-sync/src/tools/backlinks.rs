@@ -1,6 +1,6 @@
 //! Backlinks tool - list a note's incoming and outgoing wiki-links.
 
-use obsidian_fs::ensure_markdown_extension;
+use notes_core::note_ref::ensure_markdown_extension;
 use rmcp::model::{CallToolResult, Content, ErrorData};
 use tokio::sync::RwLock;
 
@@ -84,7 +84,7 @@ mod tests {
         graph.write().await.update_note(
             &name,
             PathBuf::from(rel),
-            wiki_links::extract_linked_notes(content)
+            notes_core::wiki_links::extract_linked_notes(content)
                 .into_iter()
                 .collect(),
         );

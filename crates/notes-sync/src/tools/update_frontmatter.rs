@@ -1,6 +1,5 @@
-use obsidian_fs::{
-    Frontmatter, build_note_with_frontmatter, ensure_markdown_extension, parse_frontmatter,
-};
+use notes_core::frontmatter::{Frontmatter, build_note_with_frontmatter, parse_frontmatter};
+use notes_core::note_ref::ensure_markdown_extension;
 use rmcp::model::{CallToolResult, Content, ErrorData};
 use serde::Serialize;
 use serde_json::Value as JsonValue;

@@ -584,7 +584,7 @@ pub async fn run_http_server(
     config: Config,
     listen: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    serve_http(config, listen, memory_common::shutdown_signal()).await
+    serve_http(config, listen, notes_core::runtime::shutdown_signal()).await
 }
 
 /// Run the MCP HTTP server (`/mcp` + `/health`) until `shutdown` resolves.

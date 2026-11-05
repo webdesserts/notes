@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use notes_core::wiki_links::extract_linked_notes;
 use tokio::fs;
-use wiki_links::extract_linked_notes;
 
 /// Tracks forward links and backlinks between notes in the vault.
 ///
@@ -102,7 +102,7 @@ impl GraphIndex {
             .unwrap_or(file_path)
             .to_path_buf();
 
-        // Extract linked notes using wiki-links crate
+        // Extract linked notes using notes_core::wiki_links
         let linked_notes = extract_linked_notes(&content);
         let links: HashSet<String> = linked_notes.into_iter().collect();
 

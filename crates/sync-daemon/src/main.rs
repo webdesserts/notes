@@ -59,7 +59,7 @@ impl From<Args> for DaemonRunConfig {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    memory_common::init_tracing(args.verbose, "sync_daemon");
+    notes_core::runtime::init_tracing(args.verbose, "sync_daemon");
 
     sync_daemon::daemon::run(args.into()).await
 }

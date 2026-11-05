@@ -172,7 +172,7 @@ pub async fn run(config: super::DaemonRunConfig) -> Result<()> {
     let token = CancellationToken::new();
     let signal_token = token.clone();
     tokio::spawn(async move {
-        memory_common::shutdown_signal().await;
+        notes_core::runtime::shutdown_signal().await;
         signal_token.cancel();
     });
     run_with_shutdown(config, token).await

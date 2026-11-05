@@ -3,7 +3,7 @@
 //! Based on the MCP filesystem server's edit_file implementation,
 //! this tool uses oldText/newText pairs for precise edits.
 
-use obsidian_fs::ensure_markdown_extension;
+use notes_core::note_ref::ensure_markdown_extension;
 use rmcp::model::{CallToolResult, Content, ErrorData};
 use serde::Serialize;
 use std::path::Path;

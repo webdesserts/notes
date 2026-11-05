@@ -56,9 +56,6 @@ urlencoding = "2.1"
 dirs = "6"
 
 # Workspace crates
-memory-common = { path = "../memory-common" }
-wiki-links = { path = "../wiki-links" }
-obsidian-fs = { path = "../obsidian-fs" }
 notes-core = { path = "../notes-core" }
 
 # Tracing/logging

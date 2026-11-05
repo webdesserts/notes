@@ -1739,7 +1739,7 @@ name = "desktop"
 version = "0.5.3"
 dependencies = [
  "anyhow",
- "memory-common",
+ "notes-core",
  "notes-sync",
  "serde",
  "serde_json",
@@ -4567,18 +4567,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "memory-common"
-version = "0.5.3"
-dependencies = [
- "dirs 6.0.0",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5039,12 +5027,18 @@ name = "notes-core"
 version = "0.5.3"
 dependencies = [
  "async-trait",
+ "dirs 6.0.0",
  "hex",
- "obsidian-fs",
  "rand 0.9.2",
+ "serde",
+ "serde_json",
+ "serde_yaml",
  "sha2 0.10.9",
  "tempfile",
  "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -5059,11 +5053,9 @@ dependencies = [
  "futures-util",
  "hex",
  "http-body-util",
- "memory-common",
  "notes-core",
  "notify",
  "notify-debouncer-mini",
- "obsidian-fs",
  "once_cell",
  "regex",
  "reqwest 0.12.28",
@@ -5080,7 +5072,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "urlencoding",
- "wiki-links",
 ]
 
 [[package]]
@@ -5503,15 +5494,6 @@ dependencies = [
  "objc2-app-kit",
  "objc2-core-foundation",
  "objc2-foundation",
-]
-
-[[package]]
-name = "obsidian-fs"
-version = "0.5.3"
-dependencies = [
- "serde",
- "serde_json",
- "serde_yaml",
 ]
 
 [[package]]
@@ -7834,7 +7816,7 @@ dependencies = [
  "fs2",
  "futures",
  "gethostname",
- "memory-common",
+ "notes-core",
  "notify",
  "notify-debouncer-mini",
  "p2p-core",
@@ -9555,13 +9537,6 @@ name = "widestring"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
-
-[[package]]
-name = "wiki-links"
-version = "0.5.3"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "winapi"

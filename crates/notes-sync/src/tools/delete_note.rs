@@ -1,6 +1,6 @@
 //! DeleteNote tool - delete a note from the vault.
 
-use obsidian_fs::ensure_markdown_extension;
+use notes_core::note_ref::ensure_markdown_extension;
 use rmcp::model::{CallToolResult, Content, ErrorData};
 use std::path::Path;
 use tokio::sync::RwLock;

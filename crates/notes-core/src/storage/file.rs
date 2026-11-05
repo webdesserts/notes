@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use obsidian_fs::validate_relative_path;
+use crate::note_ref::validate_relative_path;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use tokio::fs;

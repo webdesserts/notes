@@ -1,6 +1,6 @@
 //! MoveNote tool - move/rename a note and update backlinks.
 
-use obsidian_fs::{ensure_markdown_extension, normalize_note_reference};
+use notes_core::note_ref::{ensure_markdown_extension, normalize_note_reference};
 use rmcp::model::{CallToolResult, Content, ErrorData};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 use super::common::resolve_note_uri;
 use crate::graph::GraphIndex;
 use crate::storage::{Storage, StorageError};
-use wiki_links::extract_linked_notes;
+use notes_core::wiki_links::extract_linked_notes;
 
 /// Execute the MoveNote tool.
 ///

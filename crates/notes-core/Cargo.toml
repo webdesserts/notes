@@ -4,20 +4,29 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Note-editing core: outline/section addressing and content-hash-guarded storage, shared by the MCP server and other note-editing consumers"
+description = "Note-editing core: outline/section addressing, content-hash-guarded storage, frontmatter, note references, wiki links, and the shared binary runtime (tracing, shutdown)"
 
 [lib]
 crate-type = ["rlib"]
 
 [dependencies]
-obsidian-fs = { path = "../obsidian-fs" }
-
 async-trait.workspace = true
 tokio.workspace = true
 rand.workspace = true
 
 sha2 = "0.10"
 hex = "0.4"
+
+# frontmatter, note_ref, wiki_links
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml = "0.9"
+
+# runtime: tracing setup, ~ expansion, shutdown signal
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+dirs = "6"
 
 [dev-dependencies]
 tempfile.workspace = true

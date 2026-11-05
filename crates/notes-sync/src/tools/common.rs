@@ -1,6 +1,7 @@
 //! Shared utilities for note tools.
 
-use obsidian_fs::{normalize_note_reference, parse_frontmatter};
+use notes_core::frontmatter::parse_frontmatter;
+use notes_core::note_ref::normalize_note_reference;
 use tokio::fs;
 
 use crate::graph::GraphIndex;

@@ -14,7 +14,7 @@ p2p-core = { path = "../p2p-core" }
 # vault-sync's default `network` feature carries the iroh sync seam (SyncNode,
 # gossip, PeerRegistry); `--no-default-features` is the pure Loro + FileSystem core.
 vault-sync = { path = "../vault-sync" }
-memory-common = { path = "../memory-common" }
+notes-core = { path = "../notes-core" }
 tokio.workspace = true
 bincode.workspace = true
 async-trait.workspace = true
