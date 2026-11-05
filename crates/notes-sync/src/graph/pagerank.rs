@@ -2,25 +2,56 @@
 
 use super::GraphIndex;
 use std::collections::HashMap;
-use std::path::Path;
 
 const DEFAULT_DAMPING: f64 = 0.85;
 const DEFAULT_TOLERANCE: f64 = 1e-6;
 const DEFAULT_MAX_ITER: usize = 100;
 
-/// Compute Personalized PageRank scores from a seed note.
+/// Resolve a note reference to vault-relative paths.
 ///
-/// Returns a map of note names to proximity scores (0.0-1.0), where higher
-/// scores indicate stronger connection to the seed through the link graph.
+/// Accepts a relative path with or without `.md` (`projects/X`, `projects/X.md`)
+/// or a bare note name (`X`), which matches every same-named note in any folder.
+/// A `#heading` or `|alias` suffix is ignored. A path that does not exist resolves
+/// to nothing (it does not fall back to a name lookup).
+pub fn resolve_note_ref(graph: &GraphIndex, note_ref: &str) -> Vec<String> {
+    let base = note_ref.split('|').next().unwrap_or_default();
+    let base = base.split('#').next().unwrap_or_default();
+    let trimmed = base.trim().trim_start_matches('/');
+    let stem = trimmed.strip_suffix(".md").unwrap_or(trimmed);
+    if stem.is_empty() {
+        return Vec::new();
+    }
+
+    let with_ext = format!("{stem}.md");
+    if graph.get_forward_links(&with_ext).is_some() {
+        return vec![with_ext];
+    }
+    if stem.contains('/') {
+        return Vec::new();
+    }
+
+    let mut paths: Vec<String> = graph
+        .get_paths_for_name(stem)
+        .map(|paths| paths.iter().cloned().collect())
+        .unwrap_or_default();
+    paths.sort();
+    paths
+}
+
+/// Compute Personalized PageRank scores from one or more seed paths.
+///
+/// Returns a map of vault-relative paths to proximity scores (0.0-1.0, normalized
+/// to the max), where higher scores indicate stronger connection to the seeds
+/// through the link graph. Paths with zero score are omitted.
 ///
 /// Algorithm:
-/// - Random walks start at the seed node
-/// - At each step: 85% follow random link, 15% restart at seed
+/// - Random walks start at the seed nodes (restart probability split evenly)
+/// - At each step: 85% follow random link, 15% restart at a seed
 /// - Iterate until convergence or max iterations
-pub fn personalized_pagerank(graph: &GraphIndex, seed: &str) -> HashMap<String, f64> {
+pub fn personalized_pagerank(graph: &GraphIndex, seed_paths: &[String]) -> HashMap<String, f64> {
     personalized_pagerank_with_params(
         graph,
-        seed,
+        seed_paths,
         DEFAULT_DAMPING,
         DEFAULT_TOLERANCE,
         DEFAULT_MAX_ITER,
@@ -30,106 +61,75 @@ pub fn personalized_pagerank(graph: &GraphIndex, seed: &str) -> HashMap<String, 
 /// Compute Personalized PageRank with custom parameters.
 pub fn personalized_pagerank_with_params(
     graph: &GraphIndex,
-    seed: &str,
+    seed_paths: &[String],
     damping: f64,
     tolerance: f64,
     max_iter: usize,
 ) -> HashMap<String, f64> {
-    // Build list of all nodes (paths)
-    let nodes: Vec<String> = graph.all_paths().cloned().collect();
+    // Index nodes once so the iteration works on dense vectors
+    let mut nodes: Vec<&String> = graph.all_paths().collect();
+    nodes.sort();
     let n = nodes.len();
-
-    // Seed is a note name, find matching paths
-    let seed_paths: Vec<&String> = nodes
+    let index: HashMap<&str, usize> = nodes
         .iter()
-        .filter(|p| Path::new(p).file_stem().and_then(|s| s.to_str()) == Some(seed))
+        .enumerate()
+        .map(|(i, path)| (path.as_str(), i))
         .collect();
 
-    if n == 0 || seed_paths.is_empty() {
+    let mut seeds: Vec<usize> = seed_paths
+        .iter()
+        .filter_map(|path| index.get(path.as_str()).copied())
+        .collect();
+    seeds.sort_unstable();
+    seeds.dedup();
+
+    if n == 0 || seeds.is_empty() {
         return HashMap::new();
     }
 
-    // Initialize scores uniformly
-    let mut scores: HashMap<String, f64> = HashMap::new();
-    let init_score = 1.0 / n as f64;
-    for node in &nodes {
-        scores.insert(node.clone(), init_score);
-    }
-
     // Personalization vector (restart only at seed paths)
-    let mut personalization: HashMap<String, f64> = HashMap::new();
-    let restart_prob = 1.0 / seed_paths.len() as f64;
-    for seed_path in &seed_paths {
-        personalization.insert((*seed_path).clone(), restart_prob);
+    let mut personalization = vec![0.0; n];
+    let restart_prob = 1.0 / seeds.len() as f64;
+    for &seed in &seeds {
+        personalization[seed] = restart_prob;
     }
 
-    // Pre-compute reverse adjacency map (node -> nodes that link to it)
-    // This changes algorithm from O(n²) to O(n×avg_degree) per iteration
+    // Reverse adjacency and out-degrees, computed once per call
     let start_time = std::time::Instant::now();
-    let mut incoming: HashMap<String, Vec<String>> = HashMap::new();
-    for source_node in &nodes {
-        let neighbors = graph.get_neighborhood(source_node);
-        for target in neighbors {
-            incoming
-                .entry(target)
-                .or_default()
-                .push(source_node.clone());
+    let mut incoming: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut out_degree = vec![0usize; n];
+    for (source, path) in nodes.iter().enumerate() {
+        for target in graph.get_neighborhood(path) {
+            if let Some(&t) = index.get(target.as_str()) {
+                incoming[t].push(source);
+                out_degree[source] += 1;
+            }
         }
     }
 
     tracing::debug!(
-        seed = seed,
+        seeds = seeds.len(),
         nodes = n,
-        avg_incoming = incoming.values().map(|v| v.len()).sum::<usize>() / n.max(1),
+        avg_incoming = incoming.iter().map(Vec::len).sum::<usize>() / n,
         "Starting Personalized PageRank"
     );
 
-    // Iteratively compute PageRank
+    let mut scores = vec![1.0 / n as f64; n];
+    let mut next = vec![0.0; n];
     let mut converged_at = None;
     for iteration in 0..max_iter {
-        let mut new_scores: HashMap<String, f64> = HashMap::new();
-
-        for node in &nodes {
-            let mut score = 0.0;
-
-            // Sum contributions from nodes that link to this node (reverse adjacency)
-            if let Some(sources) = incoming.get(node) {
-                for source_node in sources {
-                    let source_score = scores.get(source_node).copied().unwrap_or(0.0);
-                    let source_out_degree = graph.get_neighborhood(source_node).len() as f64;
-
-                    if source_out_degree > 0.0 {
-                        score += source_score / source_out_degree;
-                    }
-                }
-            }
-
-            // Apply damping and personalization
-            let restart_prob = personalization.get(node).copied().unwrap_or(0.0);
-            score = damping * score + (1.0 - damping) * restart_prob;
-
-            new_scores.insert(node.clone(), score);
+        for (t, sources) in incoming.iter().enumerate() {
+            // Every source has out_degree >= 1 because it has an edge to t
+            let sum: f64 = sources
+                .iter()
+                .map(|&s| scores[s] / out_degree[s] as f64)
+                .sum();
+            next[t] = damping * sum + (1.0 - damping) * personalization[t];
         }
 
         // Check convergence (L1 distance)
-        let mut diff = 0.0;
-        for node in &nodes {
-            let old = scores.get(node).copied().unwrap_or(0.0);
-            let new = new_scores.get(node).copied().unwrap_or(0.0);
-            diff += (new - old).abs();
-        }
-
-        scores = new_scores;
-
-        // Log progress every 10 iterations
-        if iteration % 10 == 0 && iteration > 0 {
-            tracing::debug!(
-                iteration = iteration,
-                max_iter = max_iter,
-                diff = diff,
-                "PageRank iteration progress"
-            );
-        }
+        let diff: f64 = scores.iter().zip(&next).map(|(a, b)| (a - b).abs()).sum();
+        std::mem::swap(&mut scores, &mut next);
 
         if diff < tolerance {
             converged_at = Some(iteration);
@@ -140,14 +140,14 @@ pub fn personalized_pagerank_with_params(
     let elapsed = start_time.elapsed();
     if let Some(iter) = converged_at {
         tracing::debug!(
-            seed = seed,
+            seeds = seeds.len(),
             iterations = iter,
             elapsed_ms = elapsed.as_millis(),
             "PageRank converged"
         );
     } else {
         tracing::warn!(
-            seed = seed,
+            seeds = seeds.len(),
             max_iter = max_iter,
             elapsed_ms = elapsed.as_millis(),
             "PageRank did not converge"
@@ -155,25 +155,17 @@ pub fn personalized_pagerank_with_params(
     }
 
     // Normalize so all scores are relative to the max score
-    // This ensures the seed (or most connected node) has score ~1.0
-    let max_score = scores.values().copied().fold(0.0f64, f64::max);
-    if max_score > 0.0 {
-        for score in scores.values_mut() {
-            *score /= max_score;
-        }
+    let max_score = scores.iter().copied().fold(0.0f64, f64::max);
+    if max_score <= 0.0 {
+        return HashMap::new();
     }
 
-    // Convert path keys to note name keys for the caller
-    // If multiple paths have the same note name, take the max score
-    let mut name_scores: HashMap<String, f64> = HashMap::new();
-    for (path, score) in scores {
-        if let Some(name) = Path::new(&path).file_stem().and_then(|s| s.to_str()) {
-            let entry = name_scores.entry(name.to_string()).or_insert(0.0);
-            *entry = entry.max(score);
-        }
-    }
-
-    name_scores
+    nodes
+        .into_iter()
+        .zip(scores)
+        .filter(|(_, score)| *score > 0.0)
+        .map(|(path, score)| (path.clone(), score / max_score))
+        .collect()
 }
 
 #[cfg(test)]
@@ -182,56 +174,134 @@ mod tests {
     use std::collections::HashSet;
     use std::path::PathBuf;
 
+    fn links(names: &[&str]) -> HashSet<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn seeds(paths: &[&str]) -> Vec<String> {
+        paths.iter().map(|s| s.to_string()).collect()
+    }
+
     #[test]
     fn test_linear_graph() {
         // A -> B -> C (bidirectional due to backlinks)
         let mut graph = GraphIndex::new();
-
-        let mut links_a = HashSet::new();
-        links_a.insert("B".to_string());
-        graph.update_note("A", PathBuf::from("A.md"), links_a);
-
-        let mut links_b = HashSet::new();
-        links_b.insert("C".to_string());
-        graph.update_note("B", PathBuf::from("B.md"), links_b);
-
+        graph.update_note("A", PathBuf::from("A.md"), links(&["B"]));
+        graph.update_note("B", PathBuf::from("B.md"), links(&["C"]));
         graph.update_note("C", PathBuf::from("C.md"), HashSet::new());
 
-        let scores = personalized_pagerank(&graph, "A");
+        let scores = personalized_pagerank(&graph, &seeds(&["A.md"]));
 
-        // Get scores
-        let score_a = scores.get("A").copied().unwrap_or(0.0);
-        let score_b = scores.get("B").copied().unwrap_or(0.0);
-        let score_c = scores.get("C").copied().unwrap_or(0.0);
+        let score_a = scores.get("A.md").copied().unwrap_or(0.0);
+        let score_b = scores.get("B.md").copied().unwrap_or(0.0);
+        let score_c = scores.get("C.md").copied().unwrap_or(0.0);
 
-        // B is directly connected to A (1-hop), C is 2-hops away
-        // A should have highest score (normalized to 1.0)
-        // B should be close to A since it's directly connected
-        // C should have lower score (further away)
-        assert!(score_a >= 0.7); // Seed has high score
-        assert!(score_b >= 0.5); // Direct neighbor
-        assert!(score_c < score_b); // Further away has lower score
-        assert!(score_c > 0.0); // But still reachable
+        // A is the seed, B is 1 hop away, C is 2 hops away
+        assert!(score_a >= 0.7);
+        assert!(score_b >= 0.5);
+        assert!(score_c < score_b);
+        assert!(score_c > 0.0);
     }
 
     #[test]
     fn test_disconnected_nodes() {
         // A -> B, C (disconnected)
         let mut graph = GraphIndex::new();
-
-        let mut links_a = HashSet::new();
-        links_a.insert("B".to_string());
-        graph.update_note("A", PathBuf::from("A.md"), links_a);
-
+        graph.update_note("A", PathBuf::from("A.md"), links(&["B"]));
         graph.update_note("B", PathBuf::from("B.md"), HashSet::new());
         graph.update_note("C", PathBuf::from("C.md"), HashSet::new());
 
-        let scores = personalized_pagerank(&graph, "A");
+        let scores = personalized_pagerank(&graph, &seeds(&["A.md"]));
 
-        let score_b = scores.get("B").copied().unwrap_or(0.0);
-        let score_c = scores.get("C").copied().unwrap_or(0.0);
-
-        // B should have higher score than disconnected C
+        let score_b = scores.get("B.md").copied().unwrap_or(0.0);
+        let score_c = scores.get("C.md").copied().unwrap_or(0.0);
         assert!(score_b > score_c);
+    }
+
+    #[test]
+    fn test_scores_are_keyed_by_subfolder_path() {
+        let mut graph = GraphIndex::new();
+        graph.update_note("Hub", PathBuf::from("projects/Hub.md"), links(&["Leaf"]));
+        graph.update_note("Leaf", PathBuf::from("knowledge/Leaf.md"), HashSet::new());
+
+        let scores = personalized_pagerank(&graph, &seeds(&["projects/Hub.md"]));
+
+        assert!(scores.get("knowledge/Leaf.md").copied().unwrap_or(0.0) > 0.0);
+        assert!(!scores.contains_key("Leaf"));
+    }
+
+    #[test]
+    fn test_two_seeds_add_instead_of_multiplying() {
+        // Two separate components: A - B and C - D
+        let mut graph = GraphIndex::new();
+        graph.update_note("A", PathBuf::from("A.md"), links(&["B"]));
+        graph.update_note("B", PathBuf::from("B.md"), HashSet::new());
+        graph.update_note("C", PathBuf::from("C.md"), links(&["D"]));
+        graph.update_note("D", PathBuf::from("D.md"), HashSet::new());
+
+        let scores = personalized_pagerank(&graph, &seeds(&["A.md", "C.md"]));
+
+        // Each neighbor is close to one seed only; a product across seeds would be 0
+        assert!(scores.get("B.md").copied().unwrap_or(0.0) > 0.0);
+        assert!(scores.get("D.md").copied().unwrap_or(0.0) > 0.0);
+    }
+
+    #[test]
+    fn test_same_name_notes_keep_separate_scores() {
+        let mut graph = GraphIndex::new();
+        graph.update_note("X", PathBuf::from("knowledge/X.md"), links(&["Z"]));
+        graph.update_note("X", PathBuf::from("projects/X.md"), HashSet::new());
+        graph.update_note("Z", PathBuf::from("Z.md"), HashSet::new());
+
+        let scores = personalized_pagerank(&graph, &seeds(&["Z.md"]));
+
+        let linked = scores.get("knowledge/X.md").copied().unwrap_or(0.0);
+        let unlinked = scores.get("projects/X.md").copied().unwrap_or(0.0);
+        assert!(linked > 0.0);
+        assert!(linked > unlinked);
+    }
+
+    #[test]
+    fn test_unknown_seed_returns_empty() {
+        let mut graph = GraphIndex::new();
+        graph.update_note("A", PathBuf::from("A.md"), HashSet::new());
+        assert!(personalized_pagerank(&graph, &seeds(&["Missing.md"])).is_empty());
+        assert!(personalized_pagerank(&graph, &[]).is_empty());
+    }
+
+    #[test]
+    fn test_resolve_note_ref() {
+        let mut graph = GraphIndex::new();
+        graph.update_note("X", PathBuf::from("knowledge/X.md"), HashSet::new());
+        graph.update_note("X", PathBuf::from("projects/X.md"), HashSet::new());
+        graph.update_note("Plan", PathBuf::from("plans/Plan.md"), HashSet::new());
+
+        assert_eq!(
+            resolve_note_ref(&graph, "plans/Plan"),
+            vec!["plans/Plan.md"]
+        );
+        assert_eq!(
+            resolve_note_ref(&graph, "plans/Plan.md"),
+            vec!["plans/Plan.md"]
+        );
+        assert_eq!(
+            resolve_note_ref(&graph, "Plan#Section"),
+            vec!["plans/Plan.md"]
+        );
+        assert_eq!(
+            resolve_note_ref(&graph, "Plan|alias"),
+            vec!["plans/Plan.md"]
+        );
+        assert_eq!(
+            resolve_note_ref(&graph, "X"),
+            vec!["knowledge/X.md", "projects/X.md"]
+        );
+        assert_eq!(
+            resolve_note_ref(&graph, "projects/X"),
+            vec!["projects/X.md"]
+        );
+        assert!(resolve_note_ref(&graph, "scratch/X").is_empty());
+        assert!(resolve_note_ref(&graph, "Missing").is_empty());
+        assert!(resolve_note_ref(&graph, "  ").is_empty());
     }
 }

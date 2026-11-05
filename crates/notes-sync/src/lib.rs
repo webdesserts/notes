@@ -73,6 +73,24 @@ pub struct SearchParams {
     pub debug: bool,
 }
 
+/// Parameters for the Recommend tool
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RecommendParams {
+    /// Free text describing the current focus. [[wiki-links]] in it are used as seeds too.
+    #[serde(default)]
+    pub query: String,
+    /// Seed notes for graph proximity: relative paths (projects/X or projects/X.md) or note names. Seeds are never returned.
+    #[serde(default)]
+    pub seeds: Vec<String>,
+    /// Notes to leave out of the results: relative paths or note names (e.g. notes already open).
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    /// Maximum number of results (default 5, max 20).
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
 /// Parameters for the WriteLogs tool
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -437,6 +455,26 @@ impl MemoryServer {
             self.embeddings(),
             &params.0.query,
             params.0.debug,
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Recommend related notes for an agent's current focus. Combines semantic similarity to the query and seed notes with Personalized PageRank proximity to the seeds (score = semantic + 0.3 × graph). Returns JSON structured content {query, seeds, results: [{path, name, score, semantic, graph}]}; seeds and excluded notes are never returned."
+    )]
+    async fn recommend(
+        &self,
+        params: Parameters<RecommendParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let graph = self.graph().read().await;
+        tools::search::recommend(
+            &self.config().vault_path,
+            &graph,
+            self.embeddings(),
+            &params.0.query,
+            &params.0.seeds,
+            &params.0.exclude,
+            params.0.limit,
         )
         .await
     }
