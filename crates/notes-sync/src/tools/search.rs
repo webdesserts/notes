@@ -30,6 +30,8 @@ const MIN_SIMILARITY: f32 = 0.3;
 const GRAPH_WEIGHT: f32 = 0.3;
 /// Number of top graph-proximity notes recommend considers besides the semantic matches
 const GRAPH_CANDIDATES: usize = 20;
+/// Retired notes live under this folder; `recommend` never surfaces them.
+const ARCHIVE_PREFIX: &str = "archive/";
 const DEFAULT_RECOMMEND_LIMIT: usize = 5;
 const MAX_RECOMMEND_LIMIT: usize = 20;
 
@@ -210,7 +212,7 @@ fn rank_recommendations(
 
     let mut by_graph: Vec<(&str, f64)> = graph_scores
         .iter()
-        .filter(|(path, _)| !excluded.contains(path.as_str()))
+        .filter(|(path, _)| !excluded.contains(path.as_str()) && !path.starts_with(ARCHIVE_PREFIX))
         .map(|(path, score)| (path.as_str(), *score))
         .collect();
     by_graph.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(b.0)));
@@ -223,7 +225,7 @@ fn rank_recommendations(
 
     let mut results: Vec<Recommendation> = candidates
         .into_iter()
-        .filter(|path| !excluded.contains(*path))
+        .filter(|path| !excluded.contains(*path) && !path.starts_with(ARCHIVE_PREFIX))
         .map(|path| {
             let semantic = semantic_by_path.get(path).copied().unwrap_or(0.0);
             let graph = graph_scores.get(path).copied().unwrap_or(0.0) as f32;
@@ -566,6 +568,16 @@ mod tests {
 
         let paths: Vec<&str> = results.iter().map(|r| r.path.as_str()).collect();
         assert_eq!(paths, vec!["b.md", "c.md"]);
+    }
+
+    #[test]
+    fn test_rank_skips_archive() {
+        let sem = semantic(&[("archive/old.md", 0.95), ("projects/live.md", 0.6)]);
+        let gr = graph(&[("archive/README.md", 1.0), ("projects/live.md", 0.2)]);
+        let results = rank_recommendations(&sem, &gr, &HashSet::new(), 5);
+
+        let paths: Vec<&str> = results.iter().map(|r| r.path.as_str()).collect();
+        assert_eq!(paths, vec!["projects/live.md"]);
     }
 
     #[test]
