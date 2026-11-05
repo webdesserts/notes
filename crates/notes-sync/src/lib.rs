@@ -144,36 +144,20 @@ pub struct ReplaceOperation {
 pub struct ReplaceInNoteParams {
     /// Note reference - supports wiki-links ([[Note]]), memory URIs (memory:knowledge/Note), or plain names
     pub note: String,
-    /// Array of edit operations. Each oldText must appear exactly once within
-    /// the note.
+    /// Array of edit operations. Each oldText must identify exactly one
+    /// possible match (overlapping occurrences all count) within the note,
+    /// or within the selected section when `section` is set. The whole
+    /// batch is validated before anything is written.
     pub edits: Vec<ReplaceOperation>,
-    /// Content hash from ReadNote - required to verify note hasn't changed.
-    pub content_hash: String,
     /// Preview changes without applying them (default: false)
     #[serde(default, rename = "dryRun")]
     pub dry_run: bool,
-    /// Not supported by replace_in_note, which always replaces within the
-    /// whole note. Present only so a section-scoped request can be rejected
-    /// with a clear, teaching error instead of a generic "unknown field"
-    /// message. Use write_note with its own `section` parameter for
-    /// section-scoped writes.
+    /// Optional section path (from the Outline tool's `path` field) to scope
+    /// matching to one section instead of the whole note. Each oldText must
+    /// be unique inside that section; identical text elsewhere is
+    /// irrelevant. Missing or ambiguous paths are refused without writing.
     #[serde(default)]
     pub section: Option<String>,
-}
-
-/// Reject replace_in_note calls that pass `section` — replace_in_note always
-/// matches within the whole note, so a section-scoped request is a client
-/// mistake. Returns a teaching error naming the tool that does support
-/// section-scoped writes.
-fn reject_replace_in_note_section(section: Option<&str>) -> Result<(), ErrorData> {
-    if section.is_some() {
-        return Err(ErrorData::invalid_params(
-            "replace_in_note does not support section-scoped writes. Use \
-             write_note with its `section` parameter instead.",
-            None,
-        ));
-    }
-    Ok(())
 }
 
 /// Parameters for the DeleteNote tool
@@ -409,7 +393,7 @@ impl MemoryServer {
     }
 
     #[tool(
-        description = "Read the complete contents of a note. Returns JSON with content and content_hash. Content includes line numbers (cat -n format: right-aligned number + tab). content_hash is computed on raw content — pass it through to WriteNote or ReplaceInNote unchanged."
+        description = "Read the complete contents of a note. Returns JSON with content and content_hash. Content includes line numbers (cat -n format: right-aligned number + tab). content_hash is computed on raw content — pass it through to WriteNote unchanged."
     )]
     async fn read_note(
         &self,
@@ -457,14 +441,12 @@ impl MemoryServer {
     }
 
     #[tool(
-        description = "Make surgical text replacements in a note. Each edit specifies oldText (must match exactly and appear once) and newText. Requires content_hash from ReadNote. Returns JSON with new content_hash for chained edits."
+        description = "Make surgical text replacements in a note. Each edit specifies oldText (must identify exactly one possible match in the scope) and newText. No content hash needed: the note is read fresh for this operation and the batch is fully validated before anything is written. Pass the optional `section` (a path from the Outline tool) to scope matching to that section only - identical text elsewhere is irrelevant, and missing or ambiguous paths are refused without writing. Edits apply progressively within a batch (later edits see earlier output). Returns JSON with the new content_hash of the replaced scope: the whole note when unscoped, the modified section when scoped."
     )]
     async fn replace_in_note(
         &self,
         params: Parameters<ReplaceInNoteParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        reject_replace_in_note_section(params.0.section.as_deref())?;
-
         let edits: Vec<tools::replace_in_note::Edit> = params
             .0
             .edits
@@ -482,7 +464,7 @@ impl MemoryServer {
             &graph,
             &params.0.note,
             edits,
-            &params.0.content_hash,
+            params.0.section.as_deref(),
             params.0.dry_run,
         )
         .await
@@ -672,10 +654,15 @@ mod tests {
     // named guard/stub is wired into the actual handler's call path -
     // exercising it in isolation (as a free function) can't prove that.
 
+    /// replace_in_note supports section-scoped replacement: with `section`
+    /// set, only the resolved section changes and the response hash describes
+    /// the modified section. Runs through the real `#[tool]`-generated
+    /// handler to prove the wiring, not just the tool function.
     #[tokio::test]
-    async fn test_reject_replace_in_note_section_wired_into_real_handler() {
+    async fn test_replace_in_note_section_supported_through_real_handler() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let original_content = "Original content, must survive a rejected replace_in_note call.";
+        let original_content =
+            "# Intro\n\nshared phrase outside\n\n## Details\n\nshared phrase inside\n";
         tokio::fs::write(temp_dir.path().join("test.md"), original_content)
             .await
             .unwrap();
@@ -686,23 +673,181 @@ mod tests {
                 super::ReplaceInNoteParams {
                     note: "test".to_string(),
                     edits: vec![super::ReplaceOperation {
-                        old_text: "Original".to_string(),
-                        new_text: "REPLACED - must never land on disk".to_string(),
+                        old_text: "shared phrase".to_string(),
+                        new_text: "REPLACED".to_string(),
                     }],
-                    content_hash: "irrelevant-to-this-test".to_string(),
                     dry_run: false,
-                    section: Some("Some Section".to_string()),
+                    section: Some("Details".to_string()),
                 },
             ))
-            .await;
-
-        let err = result.expect_err("replace_in_note must reject a section-scoped request");
-        assert!(err.message.contains("write_note"));
+            .await
+            .expect("section-scoped replace_in_note must be supported");
+        assert!(!result.is_error.unwrap_or(false));
 
         let on_disk = tokio::fs::read_to_string(temp_dir.path().join("test.md"))
             .await
             .unwrap();
-        assert_eq!(on_disk, original_content);
+        assert_eq!(
+            on_disk,
+            "# Intro\n\nshared phrase outside\n\n## Details\n\nREPLACED inside\n"
+        );
+
+        // The scoped response hash describes the modified section, not the
+        // whole file - consistent with write_note's section-edit response.
+        let json: serde_json::Value =
+            serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+        let new_section = "## Details\n\nREPLACED inside\n";
+        assert_eq!(
+            json["content_hash"].as_str().unwrap(),
+            notes_core::ContentHash::from_content(new_section).as_str()
+        );
+    }
+
+    /// Missing and ambiguous section paths refuse replacement without
+    /// changing the note (criterion `scope-rejection`). Runs both refusals
+    /// through the real handler against the same on-disk note.
+    #[tokio::test]
+    async fn test_replace_in_note_section_refusals_through_real_handler() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let original_content = "# Notes\n\nfirst\n\n# Notes\n\nsecond\n";
+        tokio::fs::write(temp_dir.path().join("test.md"), original_content)
+            .await
+            .unwrap();
+
+        let server = test_server(temp_dir.path());
+        let make_params = |section: &str| {
+            rmcp::handler::server::wrapper::Parameters(super::ReplaceInNoteParams {
+                note: "test".to_string(),
+                edits: vec![super::ReplaceOperation {
+                    old_text: "first".to_string(),
+                    new_text: "REPLACED - must never land on disk".to_string(),
+                }],
+                dry_run: false,
+                section: Some(section.to_string()),
+            })
+        };
+
+        // Unknown path: refused, naming the outline tool.
+        let err = server
+            .replace_in_note(make_params("Missing Section"))
+            .await
+            .expect_err("an unresolved section must refuse replacement");
+        assert!(err.message.contains("Section not found"));
+
+        // Duplicate heading path: refused as ambiguous, listing candidates.
+        let err = server
+            .replace_in_note(make_params("Notes"))
+            .await
+            .expect_err("an ambiguous section must refuse replacement");
+        assert!(err.message.contains("is ambiguous, matches"));
+
+        let on_disk = tokio::fs::read_to_string(temp_dir.path().join("test.md"))
+            .await
+            .unwrap();
+        assert_eq!(
+            on_disk, original_content,
+            "both refusals must leave the note byte-for-byte unchanged"
+        );
+    }
+
+    /// No caller hash input on the replacement surface: the removed
+    /// `content_hash` field must be rejected as an unknown field by the
+    /// schema (deny_unknown_fields), not silently accepted-and-ignored or
+    /// pretended-checked.
+    #[test]
+    fn test_replace_in_note_rejects_legacy_content_hash_field() {
+        let payload = serde_json::json!({
+            "note": "test",
+            "edits": [{"oldText": "a", "newText": "b"}],
+            "content_hash": "a-hash-the-caller-had-left-over",
+        });
+
+        let result: Result<super::ReplaceInNoteParams, _> = serde_json::from_value(payload);
+        let err = result
+            .expect_err("a supplied legacy content_hash must be rejected, not silently ignored");
+        assert!(
+            err.to_string().contains("content_hash"),
+            "error should name the removed field, got: {}",
+            err
+        );
+    }
+
+    /// The canonical replace-behavior fixture, run through the real handler
+    /// (the same JSON file the notes-core kernel and the native adapter
+    /// exercise): ok cases write the expected bytes, error cases are refused
+    /// with bytes untouched.
+    #[tokio::test]
+    async fn test_canonical_replace_fixture_through_real_handler() {
+        let fixture_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../notes-core/test-fixtures/replace-behavior.json"
+        );
+        let raw = std::fs::read_to_string(fixture_path).unwrap();
+        let fixture: serde_json::Value = serde_json::from_str(&raw).unwrap();
+
+        for case in fixture["cases"].as_array().unwrap() {
+            let temp_dir = tempfile::TempDir::new().unwrap();
+            let content = case["content"].as_str().unwrap().to_string();
+            tokio::fs::write(temp_dir.path().join("test.md"), &content)
+                .await
+                .unwrap();
+
+            let server = test_server(temp_dir.path());
+            let edits: Vec<super::ReplaceOperation> = case["edits"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| super::ReplaceOperation {
+                    old_text: e["oldText"].as_str().unwrap().to_string(),
+                    new_text: e["newText"].as_str().unwrap().to_string(),
+                })
+                .collect();
+            let section = case["section"].as_str().map(|s| s.to_string());
+            let id = case["id"].as_str().unwrap();
+
+            let result = server
+                .replace_in_note(rmcp::handler::server::wrapper::Parameters(
+                    super::ReplaceInNoteParams {
+                        note: "test".to_string(),
+                        edits,
+                        dry_run: false,
+                        section,
+                    },
+                ))
+                .await;
+
+            match case["expect"].as_str().unwrap() {
+                "ok" => {
+                    let result = result.unwrap_or_else(|e| {
+                        panic!(
+                            "fixture case {id} should succeed through the handler: {}",
+                            e.message
+                        )
+                    });
+                    assert!(
+                        !result.is_error.unwrap_or(false),
+                        "fixture case {id} must not be a tool-level error"
+                    );
+                }
+                "error" => {
+                    let err = result.expect_err("fixture case must be refused");
+                    assert!(
+                        !err.message.is_empty(),
+                        "fixture case {id} refusal should carry a message"
+                    );
+                }
+                other => panic!("fixture case {id}: unknown expect kind {other}"),
+            }
+
+            let on_disk = tokio::fs::read_to_string(temp_dir.path().join("test.md"))
+                .await
+                .unwrap();
+            assert_eq!(
+                on_disk,
+                case["expectedContent"].as_str().unwrap(),
+                "fixture case {id}: on-disk bytes must match the canonical fixture"
+            );
+        }
     }
 
     #[tokio::test]

@@ -1,7 +1,16 @@
 //! ReplaceInNote tool - make surgical text replacements in a note.
 //!
-//! Based on the MCP filesystem server's edit_file implementation,
-//! this tool uses oldText/newText pairs for precise edits.
+//! Hash-free by contract: the caller supplies no content hash. The note is
+//! read fresh for this operation, the whole batch is validated against that
+//! read in memory, and the write itself is guarded by an internal CAS on the
+//! freshly-read whole-file hash (the caller never sees or supplies it).
+//!
+//! Replacement semantics come from the shared pure kernel in `notes-core`
+//! (`notes_core::replace`), which is also exercised byte-for-byte by the
+//! canonical fixture at `crates/notes-core/test-fixtures/replace-behavior.json`.
+
+use notes_core::replace::{ReplacementEdit, apply_replacements};
+use notes_core::sections::write::{SectionWriteError, resolve_section_for_edit, splice_section};
 
 use notes_core::note_ref::ensure_markdown_extension;
 use rmcp::model::{CallToolResult, Content, ErrorData};
@@ -15,7 +24,8 @@ use crate::storage::{ContentHash, Storage, StorageError};
 /// A single edit operation.
 #[derive(Debug, Clone)]
 pub struct Edit {
-    /// Text to search for - must match exactly
+    /// Text to search for - must identify exactly one possible match
+    /// (overlapping occurrences all count) in the selected scope.
     pub old_text: String,
     /// Text to replace with
     pub new_text: String,
@@ -28,7 +38,11 @@ pub struct ReplaceInNoteResponse {
     pub uri: String,
     /// The file path relative to vault
     pub path: String,
-    /// New content hash after edit - use this for subsequent edits
+    /// Hash of the replaced scope - the whole modified note for an unscoped
+    /// replace, the modified section's content when `section` was given.
+    /// This mirrors write_note's section-edit response, which also reports
+    /// the section hash, not the whole-file hash. The whole-file fresh hash
+    /// used for the internal write guard stays internal.
     pub content_hash: String,
     /// Number of edits applied
     pub edits_applied: usize,
@@ -41,7 +55,9 @@ pub struct ReplaceInNoteDryRunResponse {
     pub uri: String,
     /// The file path relative to vault
     pub path: String,
-    /// Hash that would result from applying edits
+    /// Hash the replaced scope would have after applying the edits - the
+    /// whole modified note for an unscoped replace, the modified section's
+    /// content when `section` was given. No write happens in a dry run.
     pub would_produce_hash: String,
     /// Number of edits that would be applied
     pub edits_count: usize,
@@ -49,44 +65,22 @@ pub struct ReplaceInNoteDryRunResponse {
     pub changes: String,
 }
 
-/// Apply edits to content, returning the modified content and a diff.
-fn apply_edits(content: &str, edits: &[Edit]) -> Result<(String, String), String> {
-    let mut modified = content.to_string();
-    let mut changes = Vec::new();
-
-    for edit in edits {
-        if !modified.contains(&edit.old_text) {
-            return Err(format!(
-                "Could not find text to replace:\n{}",
-                truncate_for_display(&edit.old_text, 100)
-            ));
-        }
-
-        // Count occurrences
-        let count = modified.matches(&edit.old_text).count();
-        if count > 1 {
-            return Err(format!(
-                "Text appears {} times in note - edit would be ambiguous:\n{}",
-                count,
-                truncate_for_display(&edit.old_text, 100)
-            ));
-        }
-
-        modified = modified.replacen(&edit.old_text, &edit.new_text, 1);
-        changes.push(format!(
-            "- Replaced:\n  {}\n  With:\n  {}",
-            truncate_for_display(&edit.old_text, 60),
-            truncate_for_display(&edit.new_text, 60)
-        ));
+/// Build the human-readable description of a fully-validated batch.
+fn changes_description(edits: &[Edit]) -> String {
+    if edits.is_empty() {
+        return "No changes made.".to_string();
     }
-
-    let diff = if changes.is_empty() {
-        "No changes made.".to_string()
-    } else {
-        changes.join("\n\n")
-    };
-
-    Ok((modified, diff))
+    let changes: Vec<String> = edits
+        .iter()
+        .map(|edit| {
+            format!(
+                "- Replaced:\n  {}\n  With:\n  {}",
+                truncate_for_display(&edit.old_text, 60),
+                truncate_for_display(&edit.new_text, 60)
+            )
+        })
+        .collect();
+    changes.join("\n\n")
 }
 
 /// Truncate a string for display, adding ellipsis if needed.
@@ -109,14 +103,29 @@ const MODIFIED_SINCE_READ: &str = "Note modified since last read. Read the note 
 /// Execute the ReplaceInNote tool.
 ///
 /// Makes surgical text replacements using oldText/newText pairs against a
-/// note's whole content. Each oldText must appear exactly once.
+/// note's whole content, or - when `section` is given - against the resolved
+/// section only. Each oldText must identify exactly one possible match in the
+/// selected scope; identical text elsewhere is irrelevant for a scoped
+/// replace. No caller hash is accepted: the note is read fresh here, and a
+/// concurrent out-of-band change is refused at write time by the internal
+/// whole-file hash CAS (concurrency with external writers is memory/t:10's
+/// concern, not this tool's contract).
+///
+/// Edits apply progressively in memory (later edits see earlier output), but
+/// the entire batch validates before anything is written - a failure on any
+/// edit, including one after earlier edits already succeeded in memory,
+/// leaves the note byte-for-byte unchanged.
+///
+/// The returned hash describes the replaced scope consistently with
+/// write_note's outcomes: whole-note hash when unscoped, the modified
+/// section's hash when scoped.
 pub async fn execute<S: Storage>(
     _vault_path: &Path,
     storage: &S,
     graph: &GraphIndex,
     note: &str,
     edits: Vec<Edit>,
-    content_hash: &str,
+    section: Option<&str>,
     dry_run: bool,
 ) -> Result<CallToolResult, ErrorData> {
     // Resolve the note reference using the same logic as read_note
@@ -131,33 +140,104 @@ pub async fn execute<S: Storage>(
         ));
     }
 
-    // Read current content (note existence already verified by resolve_note_uri)
+    // Read current content (note existence already verified by resolve_note_uri).
+    // This fresh full read is the single basis for everything below: section
+    // resolution, edit validation, and the write-time CAS hash.
     let (content, _metadata) = storage
         .read(&uri)
         .await
         .map_err(|e| ErrorData::internal_error(format!("Failed to read note: {}", e), None))?;
 
-    let current_hash = ContentHash::from_content(&content);
-    if current_hash.as_str() != content_hash {
-        return Err(ErrorData::invalid_params(
-            MODIFIED_SINCE_READ.to_string(),
-            None,
-        ));
-    }
+    // Resolve the section once from this operation's fresh read, if scoped.
+    // Match only inside the resolved region; unknown/ambiguous paths refuse
+    // before any edit runs, and siblings are never re-resolved or touched.
+    let (scope_content, splice_range) = match section {
+        None => (content.clone(), None),
+        Some(path) => {
+            let resolved = resolve_section_for_edit(&content, path).map_err(|e| match e {
+                SectionWriteError::NotFound { path } => ErrorData::invalid_params(
+                    format!(
+                        "Section not found: {}. Use the outline tool to see available sections.",
+                        path
+                    ),
+                    None,
+                ),
+                SectionWriteError::Ambiguous { path, candidates } => ErrorData::invalid_params(
+                    format!(
+                        "Section path '{}' is ambiguous, matches: {}. Use a longer path \
+                         to disambiguate.",
+                        path,
+                        candidates.join(", ")
+                    ),
+                    None,
+                ),
+                // Unreachable: resolve_section_for_edit performs no hash
+                // verification. Kept total so adapter error mapping stays
+                // exhaustive over the shared error type.
+                SectionWriteError::HashMismatch { .. } => ErrorData::internal_error(
+                    "section resolution unexpectedly reported a hash mismatch".to_string(),
+                    None,
+                ),
+            })?;
+            (
+                resolved.section_content,
+                Some((resolved.start_line, resolved.end_line)),
+            )
+        }
+    };
 
-    let (modified, diff) = apply_edits(&content, &edits)
-        .map_err(|e| ErrorData::invalid_params(format!("Edit failed: {}", e), None))?;
+    // Validate and apply the whole batch in memory against the selected
+    // scope. Any zero-match or ambiguous edit refuses the entire operation
+    // before any write.
+    let kernel_edits: Vec<ReplacementEdit> = edits
+        .iter()
+        .map(|e| ReplacementEdit {
+            old_text: e.old_text.clone(),
+            new_text: e.new_text.clone(),
+        })
+        .collect();
+    let modified_scope = apply_replacements(&scope_content, &kernel_edits).map_err(|rejected| {
+        match rejected.error {
+            notes_core::ReplacementError::NotFound { old_text } => ErrorData::invalid_params(
+                format!(
+                    "Edit failed: Could not find text to replace:\n{}",
+                    truncate_for_display(&old_text, 100)
+                ),
+                None,
+            ),
+            notes_core::ReplacementError::Ambiguous { old_text, count } => {
+                ErrorData::invalid_params(
+                    format!(
+                        "Edit failed: Text appears {} times in note - edit would be ambiguous:\n{}",
+                        count,
+                        truncate_for_display(&old_text, 100)
+                    ),
+                    None,
+                )
+            }
+        }
+    })?;
 
-    let file_path = ensure_markdown_extension(&uri);
-    let new_hash = ContentHash::from_content(&modified);
+    // Scoped: splice the modified section back into the full content exactly
+    // once. Unscoped: the modified scope IS the full content.
+    let new_full_content = match splice_range {
+        Some((start_line, end_line)) => {
+            splice_section(&content, start_line, end_line, &modified_scope)
+        }
+        None => modified_scope.clone(),
+    };
+
+    // The scope hash is what the response reports (whole-note hash when
+    // unscoped - identical to the full-file hash in that case).
+    let new_scope_hash = ContentHash::from_content(&modified_scope);
 
     if dry_run {
         let response = ReplaceInNoteDryRunResponse {
             uri: format!("memory:{}", uri),
-            path: file_path,
-            would_produce_hash: new_hash.as_str().to_string(),
+            path: ensure_markdown_extension(&uri),
+            would_produce_hash: new_scope_hash.as_str().to_string(),
             edits_count: edits.len(),
-            changes: diff,
+            changes: changes_description(&edits),
         };
         let json = serde_json::to_string(&response).map_err(|e| {
             ErrorData::internal_error(format!("Failed to serialize response: {}", e), None)
@@ -165,9 +245,13 @@ pub async fn execute<S: Storage>(
         return Ok(CallToolResult::success(vec![Content::text(json)]));
     }
 
-    // Write the modified content with optimistic locking (TOCTOU protection)
+    // Write the modified content with optimistic locking (TOCTOU protection):
+    // the expected hash is the fresh full-file hash read for THIS operation -
+    // an internal guard, not a caller token. A mismatch can only mean the
+    // file changed out-of-band between the read above and this write.
+    let fresh_full_hash = ContentHash::from_content(&content);
     storage
-        .write(&uri, &modified, Some(content_hash))
+        .write(&uri, &new_full_content, Some(fresh_full_hash.as_str()))
         .await
         .map_err(|e| match e {
             StorageError::HashMismatch { .. } => {
@@ -178,8 +262,8 @@ pub async fn execute<S: Storage>(
 
     let response = ReplaceInNoteResponse {
         uri: format!("memory:{}", uri),
-        path: file_path,
-        content_hash: new_hash.as_str().to_string(),
+        path: ensure_markdown_extension(&uri),
+        content_hash: new_scope_hash.as_str().to_string(),
         edits_applied: edits.len(),
     };
 
@@ -219,6 +303,47 @@ mod tests {
         changes: String,
     }
 
+    // The canonical behavioral fixture shared with the native adapter: every
+    // case runs through this storage-level execute, asserting exact resulting
+    // bytes on success and exact refusal (disk untouched) on failure.
+    const FIXTURE_PATH: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../notes-core/test-fixtures/replace-behavior.json"
+    );
+
+    #[derive(Deserialize)]
+    struct Fixture {
+        cases: Vec<FixtureCase>,
+    }
+
+    #[derive(Deserialize)]
+    struct FixtureCase {
+        id: String,
+        content: String,
+        #[serde(default)]
+        section: Option<String>,
+        edits: Vec<FixtureEdit>,
+        expect: String,
+        #[serde(default)]
+        error: Option<String>,
+        #[serde(rename = "expectedContent")]
+        expected_content: String,
+    }
+
+    #[derive(Deserialize)]
+    struct FixtureEdit {
+        #[serde(rename = "oldText")]
+        old_text: String,
+        #[serde(rename = "newText")]
+        new_text: String,
+    }
+
+    fn load_fixture() -> Fixture {
+        let raw = std::fs::read_to_string(FIXTURE_PATH)
+            .unwrap_or_else(|e| panic!("canonical fixture must be readable: {e}"));
+        serde_json::from_str(&raw).expect("canonical fixture must parse")
+    }
+
     async fn create_test_env() -> (TempDir, FileStorage, GraphIndex) {
         let temp_dir = TempDir::new().unwrap();
         let storage = FileStorage::new(temp_dir.path().to_path_buf());
@@ -247,34 +372,78 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_edit_with_wrong_hash() {
-        let (temp_dir, storage, mut graph) = create_test_env().await;
+    async fn test_canonical_fixture_cases_through_execute() {
+        let fixture = load_fixture();
 
-        fs::write(temp_dir.path().join("test.md"), "Hello, world!")
-            .await
-            .unwrap();
-        graph.update_note("test", PathBuf::from("test.md"), HashSet::new());
+        for case in &fixture.cases {
+            let (temp_dir, storage, mut graph) = create_test_env().await;
 
-        let edits = vec![Edit {
-            old_text: "world".to_string(),
-            new_text: "Rust".to_string(),
-        }];
+            fs::write(temp_dir.path().join("fixture.md"), &case.content)
+                .await
+                .unwrap();
+            graph.update_note("fixture", PathBuf::from("fixture.md"), HashSet::new());
 
-        // Should fail with wrong hash
-        let result = execute(
-            temp_dir.path(),
-            &storage,
-            &graph,
-            "test",
-            edits,
-            "wrong_hash",
-            false,
-        )
-        .await;
+            let edits: Vec<Edit> = case
+                .edits
+                .iter()
+                .map(|e| Edit {
+                    old_text: e.old_text.clone(),
+                    new_text: e.new_text.clone(),
+                })
+                .collect();
 
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.message.contains("Note modified since last read"));
+            let result = execute(
+                temp_dir.path(),
+                &storage,
+                &graph,
+                "fixture",
+                edits,
+                case.section.as_deref(),
+                false,
+            )
+            .await;
+
+            match case.expect.as_str() {
+                "ok" => {
+                    result.unwrap_or_else(|e| {
+                        panic!("case {} should succeed: {}", case.id, e.message)
+                    });
+                }
+                "error" => {
+                    let err = result.expect_err("case must be refused");
+                    let kind = case
+                        .error
+                        .as_deref()
+                        .unwrap_or_else(|| panic!("error case {} needs a kind", case.id));
+                    let needle = match kind {
+                        "not-found" => "Could not find text to replace",
+                        "ambiguous" => "edit would be ambiguous",
+                        "section-not-found" => "Section not found",
+                        "section-ambiguous" => "is ambiguous, matches",
+                        other => panic!("case {}: unknown error kind {other}", case.id),
+                    };
+                    assert!(
+                        err.message.contains(needle),
+                        "case {}: expected {kind} error mentioning '{needle}', got: {}",
+                        case.id,
+                        err.message
+                    );
+                }
+                other => panic!("case {}: unknown expect kind {other}", case.id),
+            }
+
+            // Every case asserts the exact on-disk bytes: the spliced result
+            // for ok cases, and byte-for-byte unchanged content for refusals
+            // (including a batch that failed after an earlier in-memory edit).
+            let on_disk = fs::read_to_string(temp_dir.path().join("fixture.md"))
+                .await
+                .unwrap();
+            assert_eq!(
+                on_disk, case.expected_content,
+                "case {}: on-disk bytes must match the fixture exactly",
+                case.id
+            );
+        }
     }
 
     #[tokio::test]
@@ -287,8 +456,6 @@ mod tests {
             .unwrap();
         graph.update_note("test", PathBuf::from("test.md"), HashSet::new());
 
-        let content_hash = ContentHash::from_content(content);
-
         let edits = vec![Edit {
             old_text: "world".to_string(),
             new_text: "Rust".to_string(),
@@ -300,7 +467,7 @@ mod tests {
             &graph,
             "test",
             edits,
-            content_hash.as_str(),
+            None,
             false,
         )
         .await
@@ -309,7 +476,11 @@ mod tests {
         let response = parse_response(&result);
         assert_eq!(response.uri, "memory:test");
         assert_eq!(response.edits_applied, 1);
-        assert!(!response.content_hash.is_empty());
+        // Unscoped response hash describes the whole modified note.
+        assert_eq!(
+            response.content_hash,
+            ContentHash::from_content("Hello, Rust!").as_str()
+        );
 
         // Verify content changed
         let content = fs::read_to_string(temp_dir.path().join("test.md"))
@@ -328,8 +499,6 @@ mod tests {
             .unwrap();
         graph.update_note("test", PathBuf::from("test.md"), HashSet::new());
 
-        let content_hash = ContentHash::from_content(content);
-
         let edits = vec![
             Edit {
                 old_text: "Hello".to_string(),
@@ -347,7 +516,7 @@ mod tests {
             &graph,
             "test",
             edits,
-            content_hash.as_str(),
+            None,
             false,
         )
         .await
@@ -373,8 +542,6 @@ mod tests {
             .unwrap();
         graph.update_note("test", PathBuf::from("test.md"), HashSet::new());
 
-        let content_hash = ContentHash::from_content(content);
-
         let edits = vec![Edit {
             old_text: "nonexistent".to_string(),
             new_text: "replacement".to_string(),
@@ -386,7 +553,7 @@ mod tests {
             &graph,
             "test",
             edits,
-            content_hash.as_str(),
+            None,
             false,
         )
         .await;
@@ -406,8 +573,6 @@ mod tests {
             .unwrap();
         graph.update_note("test", PathBuf::from("test.md"), HashSet::new());
 
-        let content_hash = ContentHash::from_content(content);
-
         let edits = vec![Edit {
             old_text: "foo".to_string(),
             new_text: "baz".to_string(),
@@ -419,7 +584,7 @@ mod tests {
             &graph,
             "test",
             edits,
-            content_hash.as_str(),
+            None,
             false,
         )
         .await;
@@ -427,6 +592,168 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.message.contains("appears 2 times"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_fails_if_text_overlapping_ambiguous() {
+        // `aa` fits at two overlapping positions in `aaa` - ambiguous even
+        // though a non-overlapping match count would report one.
+        let (temp_dir, storage, mut graph) = create_test_env().await;
+
+        fs::write(temp_dir.path().join("test.md"), "aaa")
+            .await
+            .unwrap();
+        graph.update_note("test", PathBuf::from("test.md"), HashSet::new());
+
+        let edits = vec![Edit {
+            old_text: "aa".to_string(),
+            new_text: "b".to_string(),
+        }];
+
+        let result = execute(
+            temp_dir.path(),
+            &storage,
+            &graph,
+            "test",
+            edits,
+            None,
+            false,
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.message.contains("appears 2 times"));
+
+        let on_disk = fs::read_to_string(temp_dir.path().join("test.md"))
+            .await
+            .unwrap();
+        assert_eq!(on_disk, "aaa");
+    }
+
+    #[tokio::test]
+    async fn test_edit_section_scoped() {
+        let (temp_dir, storage, mut graph) = create_test_env().await;
+
+        let content = "# Intro\n\nshared phrase outside\n\n## Details\n\nshared phrase inside\n";
+        fs::write(temp_dir.path().join("test.md"), content)
+            .await
+            .unwrap();
+        graph.update_note("test", PathBuf::from("test.md"), HashSet::new());
+
+        let edits = vec![Edit {
+            old_text: "shared phrase".to_string(),
+            new_text: "REPLACED".to_string(),
+        }];
+
+        let result = execute(
+            temp_dir.path(),
+            &storage,
+            &graph,
+            "test",
+            edits,
+            Some("Details"),
+            false,
+        )
+        .await
+        .expect("should succeed");
+
+        let response = parse_response(&result);
+        assert_eq!(response.edits_applied, 1);
+        // Scoped response hash describes the modified section, not the file.
+        let new_section = "## Details\n\nREPLACED inside\n";
+        assert_eq!(
+            response.content_hash,
+            ContentHash::from_content(new_section).as_str()
+        );
+        assert_ne!(
+            response.content_hash,
+            ContentHash::from_content(
+                "# Intro\n\nshared phrase outside\n\n## Details\n\nREPLACED inside\n"
+            )
+            .as_str()
+        );
+
+        // Only the section changed; identical text outside is untouched.
+        let on_disk = fs::read_to_string(temp_dir.path().join("test.md"))
+            .await
+            .unwrap();
+        assert_eq!(
+            on_disk,
+            "# Intro\n\nshared phrase outside\n\n## Details\n\nREPLACED inside\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_edit_section_not_found() {
+        let (temp_dir, storage, mut graph) = create_test_env().await;
+
+        let content = "# A\n\nbody\n";
+        fs::write(temp_dir.path().join("test.md"), content)
+            .await
+            .unwrap();
+        graph.update_note("test", PathBuf::from("test.md"), HashSet::new());
+
+        let edits = vec![Edit {
+            old_text: "body".to_string(),
+            new_text: "replaced".to_string(),
+        }];
+
+        let result = execute(
+            temp_dir.path(),
+            &storage,
+            &graph,
+            "test",
+            edits,
+            Some("Missing"),
+            false,
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.message.contains("Section not found"));
+
+        let on_disk = fs::read_to_string(temp_dir.path().join("test.md"))
+            .await
+            .unwrap();
+        assert_eq!(on_disk, content);
+    }
+
+    #[tokio::test]
+    async fn test_edit_section_ambiguous() {
+        let (temp_dir, storage, mut graph) = create_test_env().await;
+
+        let content = "# Notes\n\nfirst\n\n# Notes\n\nsecond\n";
+        fs::write(temp_dir.path().join("test.md"), content)
+            .await
+            .unwrap();
+        graph.update_note("test", PathBuf::from("test.md"), HashSet::new());
+
+        let edits = vec![Edit {
+            old_text: "first".to_string(),
+            new_text: "replaced".to_string(),
+        }];
+
+        let result = execute(
+            temp_dir.path(),
+            &storage,
+            &graph,
+            "test",
+            edits,
+            Some("Notes"),
+            false,
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.message.contains("is ambiguous, matches"));
+
+        let on_disk = fs::read_to_string(temp_dir.path().join("test.md"))
+            .await
+            .unwrap();
+        assert_eq!(on_disk, content);
     }
 
     #[tokio::test]
@@ -439,28 +766,23 @@ mod tests {
             .unwrap();
         graph.update_note("test", PathBuf::from("test.md"), HashSet::new());
 
-        let content_hash = ContentHash::from_content(content);
-
         let edits = vec![Edit {
             old_text: "world".to_string(),
             new_text: "Rust".to_string(),
         }];
 
-        let result = execute(
-            temp_dir.path(),
-            &storage,
-            &graph,
-            "test",
-            edits,
-            content_hash.as_str(),
-            true,
-        )
-        .await
-        .expect("should succeed");
+        let result = execute(temp_dir.path(), &storage, &graph, "test", edits, None, true)
+            .await
+            .expect("should succeed");
 
         let response = parse_dry_run_response(&result);
         assert_eq!(response.uri, "memory:test");
-        assert!(!response.would_produce_hash.is_empty());
+        // Dry-run hash meaning matches the write response: the replaced
+        // scope's hash (whole note here).
+        assert_eq!(
+            response.would_produce_hash,
+            ContentHash::from_content("Hello, Rust!").as_str()
+        );
         assert_eq!(response.edits_count, 1);
         assert!(response.changes.contains("Replaced"));
 
@@ -469,6 +791,47 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(content, "Hello, world!");
+    }
+
+    #[tokio::test]
+    async fn test_edit_dry_run_scoped_hash_means_section() {
+        let (temp_dir, storage, mut graph) = create_test_env().await;
+
+        let content = "# Intro\n\npreamble\n\n## Details\n\nsection body\n";
+        fs::write(temp_dir.path().join("test.md"), content)
+            .await
+            .unwrap();
+        graph.update_note("test", PathBuf::from("test.md"), HashSet::new());
+
+        let edits = vec![Edit {
+            old_text: "section body".to_string(),
+            new_text: "edited body".to_string(),
+        }];
+
+        let result = execute(
+            temp_dir.path(),
+            &storage,
+            &graph,
+            "test",
+            edits,
+            Some("Details"),
+            true,
+        )
+        .await
+        .expect("should succeed");
+
+        let response = parse_dry_run_response(&result);
+        // Scoped dry-run hash describes the modified section content.
+        assert_eq!(
+            response.would_produce_hash,
+            ContentHash::from_content("## Details\n\nedited body\n").as_str()
+        );
+
+        // Dry run never writes.
+        let on_disk = fs::read_to_string(temp_dir.path().join("test.md"))
+            .await
+            .unwrap();
+        assert_eq!(on_disk, content);
     }
 
     #[tokio::test]
@@ -486,7 +849,7 @@ mod tests {
             &graph,
             "nonexistent",
             edits,
-            "some_hash",
+            None,
             false,
         )
         .await;
@@ -506,9 +869,8 @@ mod tests {
             .unwrap();
         graph.update_note("test", PathBuf::from("test.md"), HashSet::new());
 
-        let content_hash = ContentHash::from_content(content);
-
-        // First edit
+        // First edit - no hash input required, even for a first call that
+        // never read the note.
         let edits1 = vec![Edit {
             old_text: "world".to_string(),
             new_text: "Rust".to_string(),
@@ -520,7 +882,7 @@ mod tests {
             &graph,
             "test",
             edits1,
-            content_hash.as_str(),
+            None,
             false,
         )
         .await
@@ -540,7 +902,7 @@ mod tests {
             &graph,
             "test",
             edits2,
-            &response1.content_hash,
+            None,
             false,
         )
         .await
@@ -578,7 +940,8 @@ mod tests {
             HashSet::new(),
         );
 
-        // Step 1: ReadNote
+        // Step 1: ReadNote - the returned hash is for chained overwrite
+        // tools; replace_in_note itself no longer accepts any hash.
         let read_result = super::super::read_note::execute(&storage, &graph, "My Note")
             .await
             .expect("ReadNote should succeed");
@@ -586,10 +949,9 @@ mod tests {
         let read_json: serde_json::Value =
             serde_json::from_str(&read_result.content[0].raw.as_text().unwrap().text).unwrap();
 
-        let content_hash = read_json["content_hash"].as_str().unwrap();
         assert_eq!(read_json["content"].as_str().unwrap(), "1\tHello, world!");
 
-        // Step 2: ReplaceInNote with hash from read
+        // Step 2: ReplaceInNote with no hash input at all
         let edits = vec![Edit {
             old_text: "world".to_string(),
             new_text: "Rust".to_string(),
@@ -601,7 +963,7 @@ mod tests {
             &graph,
             "My Note",
             edits,
-            content_hash,
+            None,
             false,
         )
         .await
