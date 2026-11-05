@@ -1,6 +1,6 @@
-# Obsidian Memory — Desktop App
+# NotesSync — Desktop App
 
-A native macOS menu-bar app that runs the Obsidian Memory sync daemon and
+A native macOS menu-bar app that runs the notes sync daemon and
 exposes its pairing flow through a tray UI. The app embeds `sync-daemon` as
 a Tokio task — there is no separate daemon process to start, no CLI to keep
 running.
@@ -11,9 +11,16 @@ static files served from `public/windows/`, no React).
 
 ## Status
 
-Phase 1.5 of the [Memory Desktop App](../../) effort. Ships in v0.5.x as the
-release-blocker for restoring internet-traversing sync after the plugin's
-embedded relay was removed in commit `4eec6c1`.
+This is the authoritative desktop install, approval, update and recovery guide.
+The private `webdesserts/tap/notes-sync` cask is not published yet. v0.5.8
+shipped as the `webdesserts/tap/webdesserts-memory` cask (Memory.app); its exact
+public DMG, pinned self-signed identity and final cask passed the full verify-only
+gate. A quarantined, same-token 0.5.7 → 0.5.8 smoke on arm64 macOS 26.6.2
+confirmed healthy target launch, quit and relaunch through LaunchServices without
+a second blocking approval. The owner separately attested the baseline approval
+and Spotlight relaunch. Exact-0.5.8 owner launches from Applications/Finder and
+Spotlight remain a publication blocker; use the install command below only once
+the cask is visible in the tap.
 
 **What works:**
 
@@ -28,20 +35,24 @@ embedded relay was removed in commit `4eec6c1`.
   `daemon.toml`.
 
 **Out of scope for v0.5.x:** cross-network pairing (invite codes / URLs are
-Phase 6), auto-port-forwarding, the React popup UI on left-click, code
-signing, auto-update.
+Phase 6), auto-port-forwarding, the React popup UI on left-click and in-app
+auto-update. Private distribution uses a checksum-pinned, self-signed cask;
+Developer ID signing and notarization are out of scope.
 
 ## Running
 
-The vault path is read from `OBSIDIAN_MEMORY_VAULT` (no `--vault` flag).
+Terminal development runs can use `OBSIDIAN_MEMORY_VAULT` (no `--vault` flag).
+Normal GUI launch requires a persisted vault path in `app-settings.json`;
+Finder/Spotlight do not inherit a terminal's environment. There is no first-run
+vault onboarding UI. The mandatory smoke preseeds settings for a scratch vault
+as **test preparation**, not as proof of clean-install onboarding.
 
-> **Note:** `npm run tauri dev` / `npm run tauri build` do **not** work with
-> this crate's layout — the frontend is a subfolder of the tauri crate, so
-> tauri-cli resolves the wrong cwd, and there's no `tsconfig.json` for the
-> `tsc` build step. Run the binary directly instead. **Important:** the
-> frontend is embedded at **compile time** and `dist/windows/` (the pairing
-> UIs) is **not committed**, so build the frontend **before** `cargo` compiles
-> — otherwise the pairing windows open blank:
+> **Local development:** the frontend is embedded at **compile time**, and
+> `dist/windows/` (the pairing UIs) is **not committed**. Build the frontend
+> before compiling Rust or the pairing windows open blank. The binary-only
+> helper below is not the packaged-release path; use the gated publisher tooling
+> described under [Releasing the desktop app](#releasing-the-desktop-app), not
+> ad-hoc npm Tauri commands.
 
 ```bash
 # 1. Build the frontend once (emits frontend/dist incl. the pairing windows)
@@ -55,17 +66,15 @@ cd crates/desktop/frontend && npm install && npm run build
 OBSIDIAN_MEMORY_VAULT=~/notes ./target/debug/desktop
 ```
 
-On first run the tray icon appears in the menu bar. The app is dock-less by
+With a configured vault, the tray icon appears in the menu bar. The app is dockless by
 design — the `Accessory` activation policy is set in `main.rs`. The health
 endpoint binds `127.0.0.1:8082` (the `HEALTH_PORT` const in `main.rs`; 8081 is
 avoided because it's commonly taken, e.g. by llama-swap). Change the const if needed.
 
 **Blank pairing window?** The `windows/*.html` weren't embedded — you compiled
 before building the frontend (or changed `dist/` afterward). Run `npm run build`
-in `frontend/`, then `cargo clean -p desktop` to force a re-embed, then `cargo run`.
-
-A packaged release `.app` (`tauri build`) isn't wired up for this layout yet —
-tracked as a follow-up.
+in `frontend/`, then `cargo clean -p desktop` to force a re-embed, rebuild with
+`build-desktop.sh`, and launch the signed binary.
 
 ### Code signing (firewall persistence)
 
@@ -74,12 +83,133 @@ self-signed certificate. This matters on machines running the macOS Application
 Firewall (especially MDM/stealth setups): ad-hoc signing (`codesign -s -`)
 re-anchors the firewall's allow-rule on the binary's cdhash, which changes every
 build — so you get a fresh "allow incoming connections" prompt on every rebuild.
-Signing with a named cert anchors the rule on the cert instead, so a single Allow
-persists across all future rebuilds (proven on the MDM machine 2026-06-13).
+A stable certificate supported firewall-rule persistence in the recorded local
+MDM test (2026-06-13); that is not evidence of Gatekeeper approval persistence
+for packaged-app upgrades.
 
-The cert lives in the team's 1Password **Develop** vault for fleet distribution;
-import it into your login keychain and set it to *Always Trust* for code signing,
-then `build-desktop.sh` signs with it automatically (see the team signing runbook).
+Policy: the stable identity is owner-managed in **Apple Keychain on one
+designated publisher Mac**. Local development signing requires owner-approved
+Keychain provisioning and a runbook. This guide does not establish provisioning
+on any host or authorize key distribution or trust-policy changes.
+
+## Private cask installation and updates
+
+Once the cask is visible in the tap, install it with:
+
+```text
+brew install --cask webdesserts/tap/notes-sync
+```
+
+The cask targets **arm64** and declares macOS **Tahoe** as its conservative
+support floor. The recorded smoke ran on macOS 26.6.2; that single-host result is
+not proof of compatibility with every newer release. Normal GUI launch also
+requires a persisted vault path in `app-settings.json`; the app does not yet
+provide first-run vault selection.
+
+### Expected first-launch approval
+
+With the vault path already persisted, launch NotesSync from Applications in
+Finder or through Spotlight. A visible unverified-developer Gatekeeper approval
+is expected on first install. The recorded smoke used **Open Anyway** after the
+artifact digest and signer were independently verified; the owner recognized a
+standard non-malware warning, but its exact wording was not captured and must not
+be reconstructed as a quotation:
+
+1. Verify that the cask resolves to the intended release and checksum.
+2. **Only for the expected standard unverified-developer warning for NotesSync**,
+   use **System Settings > Privacy & Security > Open Anyway** and the ordinary
+   confirmation dialog.
+3. Relaunch normally from Applications/Finder/Spotlight; use the menu-bar icon.
+
+An unexpected warning means **stop and escalate to the owner**; do not approve
+it. Preserve quarantine. Do not use `--no-quarantine`, remove quarantine with
+`xattr`, install custom trust policies, globally disable Gatekeeper/SIP, or use
+right-click as a bypass. The explicit System Settings flow is the sole trust
+exception, not a reason to weaken system security.
+
+Updates are user-triggered:
+
+```text
+brew update
+brew upgrade --cask webdesserts/tap/notes-sync
+```
+
+On the recorded macOS 26.6.2 smoke host, an ordinary same-token upgrade from the
+approved, same-signed 0.5.7 baseline to exact 0.5.8 retained quarantine and
+launched/relaunched without another blocking approval. This is one observation,
+not a promise that approval persists on every host or future release. The app
+remains dockless/menu-bar based and does not automatically restart after an
+upgrade. Quit before upgrading and relaunch normally afterward.
+
+### Recovery
+
+A failed or absent desktop artifact fails the publication gate and preserves
+the prior cask. If a bad candidate was already published:
+
+1. Disable cask publication automation so it cannot undo recovery.
+2. Have the owner revert the **exact tap cask commit**, then verify the retained
+   release asset and its digest against the restored cask.
+3. Quit NotesSync, then use the restored definition:
+
+```text
+brew update
+brew uninstall --cask webdesserts/tap/notes-sync
+brew install --cask webdesserts/tap/notes-sync
+```
+
+This is an owner-coordinated tap rollback, not an `@version` install. Relaunch
+normally; stop on unexpected warnings. Replacing the certificate is an identity
+change requiring a new probe and validation, not a routine upgrade with promised
+approval persistence.
+
+## Releasing the desktop app
+
+[`scripts/t299/publish_desktop.py`](../../scripts/t299/publish_desktop.py) defaults
+to **build-and-validate only**, with no release upload. Signing is restricted to
+the designated publisher Mac using the owner-managed Keychain identity. The
+single Tauri packaging path uses pinned **tauri-cli 2.11.4**; its compatibility
+probe must pass before real use. Probe failure means stop and replan: there is
+no fallback signing/build path. The embedded `NotesSync.app` in the DMG must pass
+validation; authored tooling alone is not proof of a valid package.
+
+Explicit `--publish` additionally requires an **existing owner-authorized tag
+and release** and upload approval. It does not create tags or replace assets.
+There is no Developer ID/notarization route and no Apple credentials are needed
+or handled. CI never holds the signing key or builds/signs desktop release bytes.
+
+The separate [`desktop-cask` workflow](../../.github/workflows/desktop-cask.yml)
+defaults to **verify**, using the exact tag and expected digest. Cask publication
+requires explicit publish intent, successful verification and owner enablement/
+environment gates. [`cask_gate.py`](../../scripts/t299/cask_gate.py) defaults to
+validate-only; pre-publication validation cannot commit or push. The owner must
+prevent competing releases and desktop publications until publication completes;
+the queue check is defensive, not an atomic lock. Broader automatic publication
+remains disabled.
+
+Production `signer_config.json` now contains the owner-approved public identity
+and exact pre-approval observations from the local compatibility probe; it
+contains no key material. It remains the sole source of spctl/ticket
+preapproval classification: the official Homebrew audit does not inspect
+Gatekeeper.
+
+The real v0.5.8 candidate audit first failed when the source used a concrete
+release URL and suggested `sha256 :no_check`, which is forbidden policy. The
+generator now emits Homebrew version interpolation (`v#{version}` /
+`NotesSync_#{version}`) while retaining the exact checksum. Full verify-only runs
+on the `macos-14` runner subsequently passed signer validation, isolated source
+resolution, collision handling, exact fetch, Ruby syntax, `brew style` and
+`brew audit --cask --online` with the Tahoe floor. Audit output is never treated
+as a Gatekeeper classifier.
+
+The v0.5.8 build, immutable tag, release upload, quarantined same-token upgrade
+and post-smoke full candidate verification are complete. The target's healthy
+launch/relaunch evidence is agent-driven through LaunchServices; the owner has
+not yet performed the required exact-0.5.8 Applications/Finder and Spotlight
+follow-up, so first tap publication remains blocked. Broader automatic
+publication is separately owner-gated and stays disabled. Runner recognition of
+the Tahoe symbol is a packaging gate, not evidence that every Tahoe or newer
+host is compatible. This guide remains the authoritative approval and recovery
+guide; the tap README provides the short install/update entry.
 
 ## Frontend / ui dependency
 
