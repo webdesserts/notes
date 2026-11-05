@@ -30,8 +30,16 @@ const MIN_SIMILARITY: f32 = 0.3;
 const GRAPH_WEIGHT: f32 = 0.3;
 /// Number of top graph-proximity notes recommend considers besides the semantic matches
 const GRAPH_CANDIDATES: usize = 20;
-/// Retired notes live under this folder; `recommend` never surfaces them.
-const ARCHIVE_PREFIX: &str = "archive/";
+/// Vault folders `recommend` never surfaces: retired notes (`archive/`) and
+/// private notes (`personal/`, `journal/`). Matched from the path root.
+const EXCLUDED_RECOMMEND_PREFIXES: [&str; 3] = ["archive/", "personal/", "journal/"];
+
+/// Whether `path` (vault-relative) lies under one of `EXCLUDED_RECOMMEND_PREFIXES`.
+fn is_excluded_recommend_path(path: &str) -> bool {
+    EXCLUDED_RECOMMEND_PREFIXES
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+}
 const DEFAULT_RECOMMEND_LIMIT: usize = 5;
 const MAX_RECOMMEND_LIMIT: usize = 20;
 
@@ -212,7 +220,7 @@ fn rank_recommendations(
 
     let mut by_graph: Vec<(&str, f64)> = graph_scores
         .iter()
-        .filter(|(path, _)| !excluded.contains(path.as_str()) && !path.starts_with(ARCHIVE_PREFIX))
+        .filter(|(path, _)| !excluded.contains(path.as_str()) && !is_excluded_recommend_path(path))
         .map(|(path, score)| (path.as_str(), *score))
         .collect();
     by_graph.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(b.0)));
@@ -225,7 +233,7 @@ fn rank_recommendations(
 
     let mut results: Vec<Recommendation> = candidates
         .into_iter()
-        .filter(|path| !excluded.contains(*path) && !path.starts_with(ARCHIVE_PREFIX))
+        .filter(|path| !excluded.contains(*path) && !is_excluded_recommend_path(path))
         .map(|path| {
             let semantic = semantic_by_path.get(path).copied().unwrap_or(0.0);
             let graph = graph_scores.get(path).copied().unwrap_or(0.0) as f32;
@@ -578,6 +586,34 @@ mod tests {
 
         let paths: Vec<&str> = results.iter().map(|r| r.path.as_str()).collect();
         assert_eq!(paths, vec!["projects/live.md"]);
+    }
+
+    #[test]
+    fn test_rank_skips_personal_and_journal() {
+        let sem = semantic(&[
+            ("personal/journal/2025-w43.md", 0.9),
+            ("journal/2026-w44.md", 0.85),
+            ("projects/live.md", 0.6),
+            ("knowledge/journal/notes.md", 0.5),
+        ]);
+        let gr = graph(&[("personal/misc/x.md", 1.0), ("projects/live.md", 0.2)]);
+        let results = rank_recommendations(&sem, &gr, &HashSet::new(), 5);
+
+        let paths: Vec<&str> = results.iter().map(|r| r.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["projects/live.md", "knowledge/journal/notes.md"]
+        );
+    }
+
+    #[test]
+    fn test_is_excluded_recommend_path() {
+        assert!(is_excluded_recommend_path("archive/old.md"));
+        assert!(is_excluded_recommend_path("personal/journal/2025-w43.md"));
+        assert!(is_excluded_recommend_path("journal/2026-w44.md"));
+        assert!(!is_excluded_recommend_path("projects/journal.md"));
+        assert!(!is_excluded_recommend_path("knowledge/personal/x.md"));
+        assert!(!is_excluded_recommend_path("archived.md"));
     }
 
     #[test]

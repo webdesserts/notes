@@ -46,9 +46,6 @@ serde_json.workspace = true
 # Error handling
 anyhow.workspace = true
 
-# Date/time
-chrono = { version = "0.4", features = ["serde"] }
-
 # JSON Schema for tool parameters
 schemars = "1.0"
 
@@ -83,7 +80,7 @@ hex = "0.4"
 # Semantic embeddings
 semantic-embeddings = { path = "../semantic-embeddings" }
 
-# Regex for parsing wiki-links
+# Regex for query-text link extraction and whitespace normalization (search.rs)
 regex = "1"
 
 # Lazy static initialization

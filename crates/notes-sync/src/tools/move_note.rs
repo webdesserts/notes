@@ -508,7 +508,7 @@ mod tests {
         assert!(moved.contains("Other"));
         let back = g.get_backlinks("New").expect("backlinks to new name");
         assert!(back.contains("A.md"));
-        assert!(g.get_backlinks("Old").map_or(true, |b| b.is_empty()));
+        assert!(g.get_backlinks("Old").is_none_or(|b| b.is_empty()));
     }
 
     #[test]

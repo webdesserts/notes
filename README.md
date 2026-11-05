@@ -156,7 +156,6 @@ The `Search` tool combines semantic embeddings with graph structure:
 
 | Tool | Description |
 |------|-------------|
-| `Remember` | Load session context (Working Memory, Log, weekly journal, project notes) at session start |
 | `Search` | Find notes by semantic similarity. Supports `query` and `debug` parameters |
 | `ReadNote` | Read full content of a note, or just one section with the optional `section` param |
 | `Outline` | Discover a note's addressable sections (frontmatter, preamble, headings) for section-scoped reads and writes on oversized notes |
@@ -167,11 +166,6 @@ The `Search` tool combines semantic embeddings with graph structure:
 | `DeleteNote` | Delete a note from the vault |
 | `GetNoteInfo` | Get metadata, frontmatter, and links for a note |
 | `UpdateFrontmatter` | Update YAML frontmatter fields |
-| `Log` | Append a timestamped entry to Log.md |
-| `WriteLogs` | Replace an entire day's log entries (for consolidation) |
-| `GetWeeklyNote` | Get the path for the current week's journal note |
-| `GetCurrentDatetime` | Get current datetime in ISO format |
-| `Reflect` | Get instructions for memory consolidation |
 
 ## Development
 

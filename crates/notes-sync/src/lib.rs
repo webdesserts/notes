@@ -17,7 +17,6 @@ use rmcp::transport::streamable_http_server::{
 mod config;
 mod embeddings;
 mod graph;
-mod projects;
 mod tools;
 mod watcher;
 
@@ -32,15 +31,6 @@ use embeddings::EmbeddingManager;
 use graph::GraphIndex;
 use storage::FileStorage;
 use watcher::VaultWatcher;
-
-/// Parameters for the Log tool
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct LogParams {
-    /// Timeline entry content (single bullet point). Tool adds timestamp and day headers automatically.
-    /// Tag work items with associated jira tickets or github issues when relevant.
-    pub content: String,
-}
 
 /// Parameters for the GetNoteInfo tool
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -89,28 +79,6 @@ pub struct RecommendParams {
     /// Maximum number of results (default 5, max 20).
     #[serde(default)]
     pub limit: Option<usize>,
-}
-
-/// Parameters for the WriteLogs tool
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WriteLogsParams {
-    /// ISO week date in YYYY-Www-D format (e.g., '2025-W50-1' for Monday of week 50). Week starts on Monday (1=Mon, 7=Sun).
-    #[serde(rename = "isoWeekDate")]
-    pub iso_week_date: String,
-    /// Object mapping time strings to log messages. Keys: '9:00 AM', '2:30 PM', etc. (12-hour format with AM/PM). Values: Log entry content. Example: { '9:00 AM': 'Started investigation', '2:30 PM': 'Fixed bug #123' }
-    pub entries: std::collections::HashMap<String, String>,
-}
-
-/// Parameters for the Remember tool
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct RememberParams {
-    /// The client's current working directory path. Used for project discovery
-    /// via git remote and directory name matching. When omitted (e.g. on iOS
-    /// or other clients without a filesystem), project discovery is skipped
-    /// but Log, Working Memory, and the weekly note are still loaded.
-    pub cwd: Option<String>,
 }
 
 /// Parameters for the ReadNote tool
@@ -371,33 +339,6 @@ impl MemoryServer {
     }
 
     #[tool(
-        description = "Get the current date and time in ISO format for use in Working Memory timeline entries. Returns ISO 8601 formatted datetime (YYYY-MM-DDTHH:MM) and additional context."
-    )]
-    async fn get_current_datetime(&self) -> Result<CallToolResult, ErrorData> {
-        tools::get_current_datetime::execute()
-    }
-
-    #[tool(
-        description = "Append a timestamped entry to Log.md for active work state and debugging context tracking. Records chronological session activity - what happened when. The tool automatically adds timestamps and organizes entries by day. Use this for tracking work in progress, debugging steps, state changes, and decisions made during active work."
-    )]
-    async fn log(&self, params: Parameters<LogParams>) -> Result<CallToolResult, ErrorData> {
-        tools::log::execute(&self.config().vault_path, &params.0.content).await
-    }
-
-    #[tool(
-        description = "Get metadata and graph connections for the current week's journal note. Returns path, URIs, frontmatter, and links/backlinks. Works whether or not the note exists yet. Use ReadNote tool to get content."
-    )]
-    async fn get_weekly_note_info(&self) -> Result<CallToolResult, ErrorData> {
-        let graph = self.graph().read().await;
-        tools::get_weekly_note_info::execute(
-            &self.config().vault_path,
-            &self.config().vault_name,
-            &graph,
-        )
-        .await
-    }
-
-    #[tool(
         description = "Get metadata and graph connections for a note. Returns frontmatter, file paths, and links/backlinks. Use ReadNote tool to get content."
     )]
     async fn get_note_info(
@@ -433,18 +374,6 @@ impl MemoryServer {
     }
 
     #[tool(
-        description = "Load all session context files in a single call. Returns Log.md, Working Memory.md, current weekly note, and discovered project notes. Automatically discovers projects based on git remotes and directory names. Use this at the start of every session to get complete context about recent work, current focus, this week's activity, and project context."
-    )]
-    async fn remember(
-        &self,
-        params: Parameters<RememberParams>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let graph = self.graph().read().await;
-        let cwd = params.0.cwd.map(std::path::PathBuf::from);
-        tools::remember::execute(&self.config().vault_path, &graph, cwd.as_deref()).await
-    }
-
-    #[tool(
         description = "Search for relevant notes using semantic similarity. Encodes the query and compares it against all note embeddings. Returns similarity-ordered list of potentially relevant notes. Supports note references via wiki-links: [[Note Name]]"
     )]
     async fn search(&self, params: Parameters<SearchParams>) -> Result<CallToolResult, ErrorData> {
@@ -477,28 +406,6 @@ impl MemoryServer {
             params.0.limit,
         )
         .await
-    }
-
-    #[tool(
-        description = "Replace an entire day's log entries with consolidated/compacted entries. Use this ONLY during memory consolidation to rewrite or summarize a day's logs. For adding new entries during active work, use the Log tool instead (it's simpler and doesn't require reading the log first). This tool automatically formats entries with correct timestamps, en-dashes, and chronological sorting. Pass an empty object to delete the entire day section (header and all entries)."
-    )]
-    async fn write_logs(
-        &self,
-        params: Parameters<WriteLogsParams>,
-    ) -> Result<CallToolResult, ErrorData> {
-        tools::write_logs::execute(
-            &self.config().vault_path,
-            &params.0.iso_week_date,
-            params.0.entries,
-        )
-        .await
-    }
-
-    #[tool(
-        description = "Review active context (Log.md, Working Memory.md, current weekly journal, project notes) and consolidate content into permanent storage. Optimizes token usage by keeping active/relevant work accessible while compressing or archiving finished work. Applies information lifecycle: active work = keep lean, shipped/merged = compress and archive. Returns detailed consolidation instructions."
-    )]
-    async fn reflect(&self) -> Result<CallToolResult, ErrorData> {
-        tools::reflect::execute()
     }
 
     #[tool(
