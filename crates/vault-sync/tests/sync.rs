@@ -653,3 +653,74 @@ mod ac_seam_lossy_transport {
         }
     }
 }
+
+
+// ========================= 3.J Phase 0.3 — key-rotation re-pair preserves data =========================
+
+mod key_rotation_repair_preserves_data {
+    use super::*;
+    use p2p_core::allowlist::{AllowlistError, AllowlistStorage, InMemoryAllowlist};
+    use p2p_core::PeerId;
+
+    /// Revoking a device is an allowlist operation only: it never deletes vault
+    /// files or Loro state. A revoked device that rotates its key and re-pairs
+    /// merges all pre-removal and offline edits without loss or duplication.
+    #[tokio::test]
+    async fn revoked_device_rotating_its_key_re_pairs_without_data_loss() {
+        let (a, b, fs_a, fs_b) = two_vaults().await;
+
+        // Pair B's initial identity into A's allowlist.
+        let allowlist = InMemoryAllowlist::new();
+        let old_b_id = PeerId::generate();
+        allowlist.add_peer(old_b_id, "device-b").await.unwrap();
+        assert!(allowlist.is_allowed(&old_b_id).await.unwrap());
+
+        // Shared base document, converged on both replicas.
+        write_and_index(&a, &fs_a, "shared.md", "para one\n\npara two\n").await;
+        full_sync(&a, &b).await;
+
+        // Revoke B. This touches the allowlist only.
+        allowlist.remove_peer(&old_b_id).await.unwrap();
+        assert!(!allowlist.is_allowed(&old_b_id).await.unwrap());
+        assert!(
+            allowlist.list_peers().await.unwrap().iter().any(|p| p.node_id == old_b_id),
+            "the revoked peer stays as a tombstone"
+        );
+
+        // Re-adding the revoked identity must fail loudly, not silently no-op.
+        let err = allowlist.add_peer(old_b_id, "device-b").await.unwrap_err();
+        assert!(
+            matches!(err, AllowlistError::PeerRevoked(id) if id == old_b_id),
+            "re-adding a revoked peer returns PeerRevoked, got {err:?}"
+        );
+
+        // Revocation must not have touched data on either replica.
+        assert_eq!(read_md_str(&fs_a, "shared.md").await, "para one\n\npara two\n");
+        assert_eq!(read_md_str(&fs_b, "shared.md").await, "para one\n\npara two\n");
+
+        // Offline divergent edits while disconnected.
+        write_and_index(&a, &fs_a, "shared.md", "para one EDITED BY A\n\npara two\n").await;
+        write_and_index(&a, &fs_a, "from-a.md", "from a\n").await;
+        write_and_index(&b, &fs_b, "shared.md", "para one\n\npara two EDITED BY B\n").await;
+        write_and_index(&b, &fs_b, "from-b.md", "from b\n").await;
+
+        // B rotates its device identity and is re-paired under the new key.
+        let new_b_id = PeerId::generate();
+        assert_ne!(new_b_id, old_b_id, "rotation yields a distinct identity");
+        allowlist.add_peer(new_b_id, "device-b-rotated").await.unwrap();
+        assert!(allowlist.is_allowed(&new_b_id).await.unwrap());
+
+        // Re-pair and converge.
+        sync_both_ways(&a, &b).await;
+
+        let md_a = read_md_str(&fs_a, "shared.md").await;
+        let md_b = read_md_str(&fs_b, "shared.md").await;
+        assert_eq!(md_a, md_b, "both replicas converge byte-identically");
+        assert!(md_a.contains("EDITED BY A"), "A edit survived: {md_a:?}");
+        assert!(md_a.contains("EDITED BY B"), "B edit survived: {md_a:?}");
+        assert_eq!(read_md_str(&fs_a, "from-a.md").await, "from a\n");
+        assert_eq!(read_md_str(&fs_b, "from-b.md").await, "from b\n");
+        assert_eq!(read_md_str(&fs_a, "from-b.md").await, "from b\n");
+        assert_eq!(read_md_str(&fs_b, "from-a.md").await, "from a\n");
+    }
+}

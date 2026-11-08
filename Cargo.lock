@@ -5483,7 +5483,7 @@ dependencies = [
 [[package]]
 name = "p2p-core"
 version = "0.1.0"
-source = "git+https://github.com/webdesserts/p2p-core.git?rev=d15f1c2498fcca0476dec9d441f665d16e588a85#d15f1c2498fcca0476dec9d441f665d16e588a85"
+source = "git+https://github.com/webdesserts/p2p-core.git?rev=453a3fbad3ff891a021378b6dd5e224f355a7217#453a3fbad3ff891a021378b6dd5e224f355a7217"
 dependencies = [
  "anyhow",
  "async-trait",

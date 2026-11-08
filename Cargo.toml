@@ -72,7 +72,7 @@ tempfile = "3"
 # P2P transport (iroh endpoint, mDNS discovery, pairing, gossip), extracted to its own repo.
 # For cross-repo work, add an uncommitted `[patch."https://github.com/webdesserts/p2p-core"]`
 # `p2p-core = { path = "../p2p-core" }` override in .cargo/config.toml.
-p2p-core = { git = "https://github.com/webdesserts/p2p-core.git", rev = "d15f1c2498fcca0476dec9d441f665d16e588a85" }
+p2p-core = { git = "https://github.com/webdesserts/p2p-core.git", rev = "453a3fbad3ff891a021378b6dd5e224f355a7217" }
 
 # The profile that 'dist' will build with
 [profile.dist]
