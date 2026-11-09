@@ -240,16 +240,16 @@ async fn startup_inner(
     // scaled duration is constructed below. Unset → never seeded → scale stays
     // 1.0 → production timing is unchanged. This is the ONLY place the env var is
     // read; the desktop app and WASM plugin never seed it.
-    if let Ok(raw) = std::env::var("OBSIDIAN_MEMORY_TIME_SCALE") {
+    if let Ok(raw) = std::env::var("NOTES_TIME_SCALE") {
         match raw.parse::<f64>() {
             Ok(scale) if p2p_core::time_scale::set_time_scale(scale) => {
                 info!(
                     scale,
-                    "OBSIDIAN_MEMORY_TIME_SCALE active — durations scaled (test mode)"
+                    "NOTES_TIME_SCALE active — durations scaled (test mode)"
                 );
             }
             Ok(_) => {}
-            Err(_) => warn!(raw = %raw, "Ignoring unparseable OBSIDIAN_MEMORY_TIME_SCALE"),
+            Err(_) => warn!(raw = %raw, "Ignoring unparseable NOTES_TIME_SCALE"),
         }
     }
 

@@ -56,7 +56,7 @@ const DEFAULT_MCP_LISTEN: &str = "127.0.0.1:8083";
 ///
 /// A non-empty result means "this box is a relay server": it gates whether the
 /// embedded relay starts and supplies the URL it advertises. The env var
-/// (`OBSIDIAN_MEMORY_RELAY_URL`) is an override that always wins; the stored value
+/// (`NOTES_RELAY_URL`) is an override that always wins; the stored value
 /// (set via the settings panel) is the fallback used by autostarted instances that
 /// launch without shell env vars. Both inputs are expected to be already
 /// empty-filtered by the caller. A `None` result means this box is a client/laptop
@@ -136,7 +136,7 @@ fn main() -> Result<()> {
         .setup(move |app| {
             // --- Vault path resolution (amendment S2: daemon_config built here) ---
             //
-            // Priority: OBSIDIAN_MEMORY_VAULT env var > stored path from
+            // Priority: NOTES_VAULT env var > stored path from
             // app-settings.json. The env var is always written back to the store so
             // that autostarted instances (which launch without shell env vars) find
             // the vault at the same location (amendment B2).
@@ -145,16 +145,16 @@ fn main() -> Result<()> {
             // forward trailing arguments to the bundled binary in `tauri dev` mode,
             // which would silently ignore the flag in development.
             let mut settings = AppSettings::load(app.handle())?;
-            let env_vault = std::env::var("OBSIDIAN_MEMORY_VAULT").ok();
+            let env_vault = std::env::var("NOTES_VAULT").ok();
             let vault_path = resolve_vault_path(
                 env_vault.as_deref(),
                 settings.vault_path().and_then(|p| p.to_str()),
             )
             .ok_or_else(|| {
                 anyhow!(
-                    "OBSIDIAN_MEMORY_VAULT is not set and no vault path is stored.\n\
+                    "NOTES_VAULT is not set and no vault path is stored.\n\
                      Set it to the path of your Obsidian vault, e.g.:\n\
-                     \x20 OBSIDIAN_MEMORY_VAULT=~/notes cargo tauri dev"
+                     \x20 NOTES_VAULT=~/notes cargo tauri dev"
                 )
             })?;
 
@@ -174,7 +174,7 @@ fn main() -> Result<()> {
             // Decide whether this box runs an embedded relay SERVER, gated solely
             // on the relay-URL setting being filled.
             //
-            // Priority for the setting: OBSIDIAN_MEMORY_RELAY_URL env var > relay
+            // Priority for the setting: NOTES_RELAY_URL env var > relay
             // URL stored in app-settings.json (set via the settings panel). The env
             // var takes precedence so stable-hostname machines (e.g. umbra) can
             // declare their public URL; the stored value lets autostarted instances —
@@ -190,7 +190,7 @@ fn main() -> Result<()> {
             // A server must declare its own public URL; we deliberately do NOT fall
             // back to a detected LAN IP here, because a LAN-IP relay URL is the same
             // unroutable-once-you-leave-the-LAN class of bug.
-            let env_relay_url = std::env::var("OBSIDIAN_MEMORY_RELAY_URL")
+            let env_relay_url = std::env::var("NOTES_RELAY_URL")
                 .ok()
                 .filter(|v| !v.is_empty());
             let stored_relay_url = settings.relay_url().map(String::from);
@@ -202,7 +202,7 @@ fn main() -> Result<()> {
 
             match &advertised_relay_url {
                 Some(url) if env_relay_url.is_some() => {
-                    info!("Relay server: advertising URL from OBSIDIAN_MEMORY_RELAY_URL: {}", url);
+                    info!("Relay server: advertising URL from NOTES_RELAY_URL: {}", url);
                 }
                 Some(url) => {
                     info!("Relay server: advertising URL from stored settings: {}", url);

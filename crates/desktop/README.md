@@ -41,7 +41,7 @@ Developer ID signing and notarization are out of scope.
 
 ## Running
 
-Terminal development runs can use `OBSIDIAN_MEMORY_VAULT` (no `--vault` flag).
+Terminal development runs can use `NOTES_VAULT` (no `--vault` flag).
 Normal GUI launch requires a persisted vault path in `app-settings.json`;
 Finder/Spotlight do not inherit a terminal's environment. There is no first-run
 vault onboarding UI. The mandatory smoke preseeds settings for a scratch vault
@@ -63,7 +63,7 @@ cd crates/desktop/frontend && npm install && npm run build
 ./scripts/build-desktop.sh
 
 # 3. Run the signed binary (starts the daemon + tray)
-OBSIDIAN_MEMORY_VAULT=~/notes ./target/debug/desktop
+NOTES_VAULT=~/notes ./target/debug/desktop
 ```
 
 With a configured vault, the tray icon appears in the menu bar. The app is dockless by

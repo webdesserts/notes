@@ -163,7 +163,7 @@ impl AppSettings {
 /// Resolve the vault path from the environment variable or a stored fallback.
 ///
 /// Priority (highest to lowest):
-/// 1. `env_vault` — the value of `OBSIDIAN_MEMORY_VAULT` if set and non-empty.
+/// 1. `env_vault` — the value of `NOTES_VAULT` if set and non-empty.
 ///    Takes precedence so the env var always works as an override on dev machines.
 /// 2. `stored_vault` — the path previously persisted in `app-settings.json`.
 ///    Used by autostarted instances that launch without the env var.
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn empty_env_string_falls_through_to_stored() {
-        // An empty env var (e.g. `OBSIDIAN_MEMORY_VAULT=`) is treated as unset,
+        // An empty env var (e.g. `NOTES_VAULT=`) is treated as unset,
         // mirroring how the relay-URL env var is empty-filtered before use.
         assert_eq!(
             resolve_vault_path(Some(""), Some("/Users/michael/notes")),

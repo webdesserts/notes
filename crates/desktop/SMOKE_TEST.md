@@ -35,8 +35,8 @@ A fresh device just **pairs** — no vault copying, no manual VaultId. On a succ
    ```
    Verify: `ls dist/windows/` shows `pair-initiator.html` + `pair-responder.html`.
 2. **Then run the app** from the crate dir (`generate_context!` embeds `frontend/dist/` at compile time; no dev server needed):
-   - bash: `cd crates/desktop && OBSIDIAN_MEMORY_VAULT=<absolute-vault-path> cargo run`
-   - nushell: `cd crates/desktop; with-env {OBSIDIAN_MEMORY_VAULT: "<absolute-vault-path>"} { cargo run }`
+   - bash: `cd crates/desktop && NOTES_VAULT=<absolute-vault-path> cargo run`
+   - nushell: `cd crates/desktop; with-env {NOTES_VAULT: "<absolute-vault-path>"} { cargo run }`
 3. First run compiles `vault-sync` + `sync-daemon` + `desktop` (~1 min). It's up when the log shows `Joined vault gossip topic` and `Health endpoint started`; verify with `curl http://127.0.0.1:8082/health` → `OK`. A single tray icon appears in the menu bar.
    - **Health port** is `127.0.0.1:8082` on all machines (the `HEALTH_PORT` const in `crates/desktop/src/main.rs`). 8081 is avoided because it's commonly taken (e.g. by llama-swap on umbra). Change the const if a machine ever needs to differ.
    - **Blank pairing window?** The `windows/*.html` weren't embedded — you compiled before building the frontend, or changed `dist/` afterward. Fix: run `npm run build` in `frontend/`, then **`cargo clean -p desktop`** to force a re-embed, then `cargo run` again.
@@ -52,7 +52,7 @@ Do this first, on throwaway data.
 
 **laptop side:**
 3. Create your **own empty** scratch vault: `mkdir ~/sync-test`. (A couple of junk `.md` files are optional — pairing pulls umbra's regardless.)
-4. Launch the app pointed at it (see **Running the app**), `OBSIDIAN_MEMORY_VAULT=/Users/<you>/sync-test`. Confirm tray + `curl http://127.0.0.1:8082/health` → `OK`.
+4. Launch the app pointed at it (see **Running the app**), `NOTES_VAULT=/Users/<you>/sync-test`. Confirm tray + `curl http://127.0.0.1:8082/health` → `OK`.
    - No vault copying, no VaultId editing — the laptop starts with its own fresh VaultId; pairing reconciles it.
 
 **Pair + verify pull (both apps running):**
@@ -78,7 +78,7 @@ Only after Phase A passes.
 - **Mobile** — no working mobile sync in v0.5.x (WASM can't bind UDP in the mobile webview). Skip the phone.
 - **Obsidian plugin** — REMOVED from v0.5.x (2026-06-23; vault-sync is the go-forward engine, the plugin/sync-wasm path is no longer maintained). The Obsidian plugin + `sync-wasm` browser/mobile code is preserved at the **`v0.4.0` git tag** — reference that for any future Obsidian-mobile / plugin work (the plan is a thin rebuild on vault-sync + iroh).
 - **Persistent umbra service** — `cargo run` is a foreground dev process. Turning umbra's app into a launch-at-boot service (built `.app` + launchd) is a follow-up once the flow is proven.
-- **Multi-vault + in-app vault/folder picker** — deferred; one vault per app instance via `OBSIDIAN_MEMORY_VAULT` for now.
+- **Multi-vault + in-app vault/folder picker** — deferred; one vault per app instance via `NOTES_VAULT` for now.
 - **Configurable health port** — currently hardcoded `8081`, overridden on umbra by a local edit; making it configurable (env var) is a small follow-up.
 
 ## Fallback: headless pairing (only if umbra's GUI tray is unavailable)
