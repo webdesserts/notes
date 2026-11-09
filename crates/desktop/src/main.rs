@@ -82,9 +82,19 @@ fn resolve_configured_relay_url(
 ///   off-LAN peers via the public relays it homes on (its RelayMap), not its own.
 ///
 /// Extracted as a pure function so the gating is testable without launching Tauri.
-fn relay_server_config(configured_relay_url: Option<String>) -> (Option<String>, Option<String>) {
+fn relay_server_config(
+    configured_relay_url: Option<String>,
+    listen_enabled: bool,
+) -> (Option<String>, Option<String>) {
     match configured_relay_url {
-        Some(url) => (Some(format!("0.0.0.0:{}", RELAY_PORT)), Some(url)),
+        Some(url) => {
+            let listen = if listen_enabled {
+                Some(format!("0.0.0.0:{}", RELAY_PORT))
+            } else {
+                None
+            };
+            (listen, Some(url))
+        }
         None => (None, None),
     }
 }
@@ -188,7 +198,7 @@ fn main() -> Result<()> {
                 resolve_configured_relay_url(env_relay_url.clone(), stored_relay_url.clone());
 
             let (relay_listen, advertised_relay_url) =
-                relay_server_config(configured_relay_url.clone());
+                relay_server_config(configured_relay_url.clone(), settings.relay_listen());
 
             match &advertised_relay_url {
                 Some(url) if env_relay_url.is_some() => {
@@ -477,16 +487,26 @@ mod tests {
     #[test]
     fn configured_url_runs_relay_server() {
         let configured = Some("http://umbra.computer:3340/".to_string());
-        let (relay_listen, advertised) = relay_server_config(configured);
+        let (relay_listen, advertised) = relay_server_config(configured, true);
         assert_eq!(relay_listen, Some(format!("0.0.0.0:{}", RELAY_PORT)));
         assert_eq!(advertised, Some("http://umbra.computer:3340/".to_string()));
+    }
+
+    /// `"relay_listen": false` keeps the advertised URL but releases `0.0.0.0:3340`
+    /// so `webdesserts-mesh` can bind it (Phase 3 cutover).
+    #[test]
+    fn relay_listen_disabled_keeps_advertised_url() {
+        let configured = Some("https://umbra.computer/relay".to_string());
+        let (relay_listen, advertised) = relay_server_config(configured, false);
+        assert_eq!(relay_listen, None);
+        assert_eq!(advertised, Some("https://umbra.computer/relay".to_string()));
     }
 
     /// A laptop (blank relay-URL setting) runs NO embedded relay and advertises NO
     /// relay URL — the core "laptops don't host a private LAN-IP relay" guarantee.
     #[test]
     fn blank_config_runs_no_relay() {
-        let (relay_listen, advertised) = relay_server_config(None);
+        let (relay_listen, advertised) = relay_server_config(None, true);
         assert_eq!(relay_listen, None);
         assert_eq!(advertised, None);
     }

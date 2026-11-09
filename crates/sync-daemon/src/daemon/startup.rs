@@ -32,6 +32,29 @@ use p2p_core::EmbeddedRelay;
 use super::Daemon;
 use super::move_recovery;
 
+/// Resolve the relay URL this node homes on.
+///
+/// An embedded relay'"'"'s own URL wins. When `relay_listen` is `None` (the Phase 3
+/// cutover releases `0.0.0.0:3340` to `webdesserts-mesh`) but an
+/// `advertised_relay_url` is configured, that URL still seeds
+/// `daemon_config.set_relay_url`, `add_known_public_relay`, `home_relays`, and
+/// `publish_mesh_info` — otherwise blanking `relay_listen` would silently stop
+/// this node homing on its own public relay.
+pub(crate) fn resolve_effective_relay_url(
+    embedded_relay_url: Option<RelayAddr>,
+    advertised_relay_url: Option<&str>,
+) -> Option<RelayAddr> {
+    embedded_relay_url.or_else(|| {
+        advertised_relay_url.and_then(|url| match RelayAddr::parse(url) {
+            Ok(parsed) => Some(parsed),
+            Err(e) => {
+                warn!(relay_url = %url, "Invalid advertised_relay_url: {e}");
+                None
+            }
+        })
+    })
+}
+
 /// Start the daemon and return a control handle before the event loop begins.
 ///
 /// Unlike `run_with_shutdown`, this function splits startup from the event loop:
@@ -317,7 +340,10 @@ async fn startup_inner(
         None
     };
 
-    let relay_url = embedded_relay.as_ref().map(|r| r.relay_url().clone());
+    let relay_url = resolve_effective_relay_url(
+        embedded_relay.as_ref().map(|r| r.relay_url().clone()),
+        config.advertised_relay_url.as_deref(),
+    );
 
     if let Some(ref url) = relay_url {
         if let Err(e) = daemon_config.set_relay_url(Some(url.as_str()), &config.vault) {
@@ -651,4 +677,43 @@ async fn startup_inner(
         _daemon_lock: daemon_lock,
         _watcher: watcher,
     })
+}
+
+#[cfg(test)]
+mod relay_url_tests {
+    use super::resolve_effective_relay_url;
+    use p2p_core::RelayAddr;
+
+    fn relay(url: &str) -> RelayAddr {
+        RelayAddr::parse(url).expect("test relay URL must parse")
+    }
+
+    #[test]
+    fn embedded_relay_url_wins_over_advertised() {
+        let embedded = relay("https://embedded.example/relay");
+        let advertised = Some("https://advertised.example/relay");
+        assert_eq!(
+            resolve_effective_relay_url(Some(embedded.clone()), advertised),
+            Some(embedded)
+        );
+    }
+
+    #[test]
+    fn advertised_url_used_when_no_embedded_relay() {
+        let advertised = "https://umbra.computer/relay";
+        assert_eq!(
+            resolve_effective_relay_url(None, Some(advertised)),
+            Some(relay(advertised))
+        );
+    }
+
+    #[test]
+    fn invalid_advertised_url_yields_none() {
+        assert_eq!(resolve_effective_relay_url(None, Some("not a url")), None);
+    }
+
+    #[test]
+    fn neither_source_yields_none() {
+        assert_eq!(resolve_effective_relay_url(None, None), None);
+    }
 }

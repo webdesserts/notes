@@ -25,6 +25,9 @@ const KEY_RELAY_URL: &str = "relay_url";
 /// JSON key for the stored autostart-enabled flag.
 const KEY_AUTOSTART_ENABLED: &str = "autostart_enabled";
 
+/// JSON key for the embedded-relay listen flag (default `true`).
+const KEY_RELAY_LISTEN: &str = "relay_listen";
+
 /// Persistent app-level settings.
 ///
 /// Loaded from and saved to the `tauri-plugin-store` JSON file at startup and
@@ -34,6 +37,8 @@ pub struct AppSettings {
     vault_path: Option<PathBuf>,
     relay_url: Option<String>,
     autostart_enabled: bool,
+    /// Whether this install hosts the embedded relay on `0.0.0.0:3340`.
+    relay_listen: bool,
 }
 
 impl AppSettings {
@@ -63,10 +68,18 @@ impl AppSettings {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
+        // Default `true`: an existing install keeps hosting its embedded relay
+        // until the settings panel (or the Phase 3 cutover) turns it off.
+        let relay_listen = store
+            .get(KEY_RELAY_LISTEN)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
         Ok(AppSettings {
             vault_path,
             relay_url,
             autostart_enabled,
+            relay_listen,
         })
     }
 
@@ -93,6 +106,7 @@ impl AppSettings {
         }
 
         store.set(KEY_AUTOSTART_ENABLED, json!(self.autostart_enabled));
+        store.set(KEY_RELAY_LISTEN, json!(self.relay_listen));
 
         store
             .save()
@@ -105,6 +119,14 @@ impl AppSettings {
 
     pub fn relay_url(&self) -> Option<&str> {
         self.relay_url.as_deref()
+    }
+
+    /// Whether this install hosts the embedded relay (`0.0.0.0:3340`).
+    ///
+    /// Defaults to `true`; the Phase 3 cutover sets `"relay_listen": false` in
+    /// `app-settings.json` so `webdesserts-mesh` can bind `:3340` instead.
+    pub fn relay_listen(&self) -> bool {
+        self.relay_listen
     }
 
     // Read by a future settings panel (design steer #8); startup autostart truth
@@ -131,6 +153,10 @@ impl AppSettings {
 
     pub fn set_autostart_enabled(&mut self, enabled: bool) {
         self.autostart_enabled = enabled;
+    }
+
+    pub fn set_relay_listen(&mut self, enabled: bool) {
+        self.relay_listen = enabled;
     }
 }
 
@@ -214,7 +240,16 @@ mod tests {
             vault_path: None,
             relay_url: None,
             autostart_enabled: false,
+            relay_listen: true,
         }
+    }
+
+    #[test]
+    fn relay_listen_defaults_true_and_round_trips() {
+        assert!(default_settings().relay_listen());
+        let mut settings = default_settings();
+        settings.set_relay_listen(false);
+        assert!(!settings.relay_listen());
     }
 
     #[test]
