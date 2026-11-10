@@ -319,7 +319,9 @@ fn main() -> Result<()> {
                 ])
                 .build()?;
 
-            let icon = tauri::include_image!("icons/32x32.png");
+            // The suite's notes glyph as a monochrome template: macOS tints it for the
+            // menu bar's appearance (light, dark, highlighted).
+            let icon = tauri::include_image!("icons/tray-template.png");
 
             // Clone handles for the event closure before ownership moves into TrayIconBuilder.
             let autostart_item_for_events = autostart_item.clone();
@@ -327,6 +329,7 @@ fn main() -> Result<()> {
             let app_for_events = handle.clone();
             TrayIconBuilder::new()
                 .icon(icon)
+                .icon_as_template(true)
                 .menu(&menu)
                 .on_menu_event(move |_tray, event| match event.id().as_ref() {
                     "quit" => {

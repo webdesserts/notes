@@ -1,12 +1,23 @@
 # Icons
 
-Generated with `cargo tauri icon path/to/source.png`.
+The webdesserts icon suite's **notes** glyph (an open book with a magenta
+ribbon) in the Neapolitan palette: purple-15 plate, sepia-85 left page,
+sepia-60 right page, magenta ribbon, 0.14 magenta sheen.
 
-The Phase 1 source is a flat 1024×1024 purple square using the Webdesserts brand color:
+Sources live in `source/`:
+
+- `icon.svg`: the app icon. The plate is inset to 412/480 of the canvas, which
+  is the margin macOS expects around app icons.
+- `tray.svg`: the same glyph in black, cropped to its bounds, for the menu bar.
+  The page gutters are wider (38 vs 24) and the ribbon's notch deeper, because
+  only the gaps separate the shapes once colour is gone at 18pt.
+
+Regenerate:
 
 ```sh
-magick -size 1024x1024 xc:'#7562EC' icon-source.png
-cargo tauri icon icon-source.png
+cargo tauri icon icons/source/icon.svg -o icons
+magick -background none -density 600 icons/source/tray.svg -resize 44x44 PNG32:icons/tray-template.png
 ```
 
-Replace `icon-source.png` with the final wordmark or glyph when Webdesserts UI assets are ready (Phase 6).
+`tray-template.png` is loaded with `icon_as_template(true)` (src/main.rs), so
+macOS tints it to match the menu bar.
