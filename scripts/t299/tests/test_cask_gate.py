@@ -35,6 +35,7 @@ class CandidateTests(unittest.TestCase):
         self.search_output = (gate.QUALIFIED + '\n', '', 0)
         self.unqualified_info_override = None
         self.absolute_ruby_source_path = False
+        self.trusted_taps = []
         self.signer_config = self.root / 'signer.json'
         self.signer_config.write_text(json.dumps(signer_fixture()))
         self.validated_paths = []
@@ -79,6 +80,8 @@ class CandidateTests(unittest.TestCase):
             return result(err='unrelated failure', code=1)
         if argv == ['brew', '--repository']:
             return result(str(self.repo) + '\n')
+        if argv == ['brew', 'trust', '--json=v1']:
+            return result(json.dumps({'taps': self.trusted_taps, 'formulae': [], 'casks': [], 'commands': []}))
         if argv[:2] == ['brew', 'info']:
             source = self.tap / gate.CASK
             cask = {'token': gate.TOKEN, 'full_token': gate.QUALIFIED, 'tap': 'webdesserts/tap',
@@ -194,10 +197,14 @@ class CandidateTests(unittest.TestCase):
             self.assertEqual(os.environ['GH_TOKEN'], hostile['GH_TOKEN'])
             self.assertEqual(os.environ['HOMEBREW_NO_INSTALL_FROM_API'], '1')
         self.assertEqual([argv[:2] for argv in seen], [
-            ['brew', '--repository'], ['ruby', '-c'], ['brew', 'info'],
+            ['brew', '--repository'], ['brew', 'trust'], ['brew', 'trust'],
+            ['ruby', '-c'], ['brew', 'info'],
             ['brew', 'fetch'], ['brew', '--cache'], ['brew', 'style'],
             ['brew', 'search'], ['brew', 'info'], ['brew', 'audit'],
+            ['brew', 'untrust'],
         ])
+        self.assertIn(['brew', 'trust', '--tap', gate.TAP], seen)
+        self.assertEqual(seen[-1], ['brew', 'untrust', '--tap', gate.TAP])
         self.assertIn(['brew', 'style', '--cask', gate.QUALIFIED], seen)
         self.assertNotIn(['brew', 'style', '--cask', str(self.tap / gate.CASK)], seen)
         self.assert_no_staging()

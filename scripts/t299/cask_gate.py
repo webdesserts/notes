@@ -20,7 +20,8 @@ from artifact_validator import ValidationError, digest, require, run
 
 REPOSITORY = 'webdesserts/notes'
 TOKEN = 'notes-sync'
-QUALIFIED = 'webdesserts/tap/' + TOKEN
+TAP = 'webdesserts/tap'
+QUALIFIED = TAP + '/' + TOKEN
 CASK = 'Casks/' + TOKEN + '.rb'
 # Literal Homebrew interpolation, kept out of .format braces by concatenation.
 CASK_URL = 'https://github.com/' + REPOSITORY + '/releases/download/v#{version}/NotesSync_#{version}_universal.dmg'
@@ -28,11 +29,14 @@ FLOORS = ('big_sur', 'monterey', 'ventura', 'sonoma', 'sequoia', 'tahoe')
 NONTERMINAL = ('queued', 'requested', 'waiting', 'pending', 'in_progress')
 STABLE_VERSION = r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
 MAX_AUDIT_OUTPUT = 65536
+MAX_STDERR = 4096
 
 
 def checked(runner, argv, **kwargs):
     result = runner(argv, **kwargs)
-    require(result.returncode == 0, 'command failed: ' + ' '.join(argv[:2]))
+    if result.returncode != 0:
+        stderr = result.stderr if isinstance(result.stderr, str) else ''
+        raise ValidationError('command failed: {}; stderr={!r}'.format(' '.join(argv[:2]), stderr[-MAX_STDERR:]))
     return result.stdout
 
 
@@ -115,6 +119,15 @@ def require_newer(tag, baseline):
         require(tuple(map(int, version(tag).split('.'))) > tuple(map(int, matches[0].split('.'))), 'candidate must be strictly newer than published version; equal-version replacement refused')
 
 
+def tap_trusted(runner, env):
+    try:
+        taps = json.loads(checked(runner, ['brew', 'trust', '--json=v1'], env=env))['taps']
+        require(isinstance(taps, list), 'invalid tap trust list')
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ValidationError('invalid tap trust list') from exc
+    return TAP in taps
+
+
 @contextmanager
 def mapped_tap(tap, runner, env):
     repository = Path(checked(runner, ['brew', '--repository'], env=env).strip())
@@ -126,17 +139,27 @@ def mapped_tap(tap, runner, env):
     owner.mkdir(exist_ok=True)
     mapping = owner / 'homebrew-tap'
     created_mapping = False
+    added_trust = False
     try:
         require(not mapping.exists() and not mapping.is_symlink(), 'isolated runner required: tap mapping already exists')
         mapping.symlink_to(tap, target_is_directory=True)
         created_mapping = True
+        # Homebrew refuses casks from untrusted non-official taps by default; trust
+        # only for the gate's lifetime and never revoke trust the user already had.
+        if not tap_trusted(runner, env):
+            checked(runner, ['brew', 'trust', '--tap', TAP], env=env)
+            added_trust = True
         yield
     finally:
-        if created_mapping:
-            require(mapping.is_symlink() and mapping.resolve() == tap, 'owned tap mapping changed; cleanup refused')
-            mapping.unlink()
-        if created_owner:
-            owner.rmdir()
+        try:
+            if added_trust:
+                checked(runner, ['brew', 'untrust', '--tap', TAP], env=env)
+        finally:
+            if created_mapping:
+                require(mapping.is_symlink() and mapping.resolve() == tap, 'owned tap mapping changed; cleanup refused')
+                mapping.unlink()
+            if created_owner:
+                owner.rmdir()
 
 
 def candidate_gates(tap, tag, sha256, runner):
