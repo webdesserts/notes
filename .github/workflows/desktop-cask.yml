@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   verify:
-    runs-on: macos-14
+    runs-on: macos-15
     outputs:
       candidate_verified: ${{ steps.candidate.outputs.verified }}
     env:
@@ -92,7 +92,7 @@ jobs:
     needs: verify
     if: ${{ inputs.intent == 'publish' && needs.verify.outputs.candidate_verified == 'true' && vars.DESKTOP_CASK_PUBLISH_ENABLED == 'true' }}
     environment: desktop-cask-publication
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       actions: read
       contents: read

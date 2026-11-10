@@ -34,3 +34,9 @@ precise-builds = true
 allow-dirty = ["ci"]
 # Custom build setup to download model before building
 github-build-setup = "../build-setup.yml"
+
+# GitHub retired the macos-14 runner images on 2026-11-02; dist 0.30.3 still
+# defaults aarch64-apple-darwin to macos-14, which cancels the job at start.
+[dist.github-custom-runners]
+aarch64-apple-darwin = "macos-15"
+
