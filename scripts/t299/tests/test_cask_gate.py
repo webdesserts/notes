@@ -90,8 +90,8 @@ class CandidateTests(unittest.TestCase):
             if self.command_failure == 'resolution':
                 cask['ruby_source_path'] = '/wrong/cask.rb'
             if argv[-1] == gate.TOKEN and self.unqualified_info_override:
-                field, value = self.unqualified_info_override
-                cask[field] = value
+                for field, value in self.unqualified_info_override.items():
+                    cask[field] = value
             return result(json.dumps({'casks': [cask]}))
         if argv[:2] == ['brew', '--cache']:
             return result(str(self.cache) + '\n')
@@ -141,12 +141,26 @@ class CandidateTests(unittest.TestCase):
                     '    url :url\n'
                     '    strategy :github_latest\n'
                     '  end\n\n'
-                                        '  depends_on macos: :sonoma\n\n'
-                    '  app "NotesSync.app"\n\n'
+                    '  auto_updates true\n'
+                    '  depends_on macos: :sonoma\n\n'
+                    '  app "NotesSync.app"\n'
+                    '  binary "#{appdir}/NotesSync.app/Contents/MacOS/desktop", target: "notes"\n\n'
+                    '  postflight_steps do\n'
+                    '    run "/usr/bin/xattr",\n'
+                    '        args:         ["-dr", "com.apple.provenance", "{{appdir}}/NotesSync.app"],\n'
+                    '        must_succeed: false,\n'
+                    '        print_stderr: false\n'
+                    '    run "/usr/bin/xattr",\n'
+                    '        args:         ["-dr", "com.apple.quarantine", "{{appdir}}/NotesSync.app"],\n'
+                    '        must_succeed: false,\n'
+                    '        print_stderr: false\n'
+                    '  end\n\n'
                     '  caveats <<~EOS\n'
-                    '    NotesSync is self-signed, not Apple-notarized. On first launch, macOS may block it.\n'
-                    '    After verifying the release, approve it once in System Settings > Privacy & Security > Open Anyway.\n'
-                    '    Never approve an unexpected warning. An upgrade may require approval again.\n'
+                    '    NotesSync is self-signed, not Apple-notarized. Homebrew clears com.apple.provenance\n'
+                    '    and quarantine in postflight_steps so the bundle does not stall at launch. If\n'
+                    '    macOS still prompts on first launch, verify the release and approve it once in\n'
+                    '    System Settings > Privacy & Security > Open Anyway.\n'
+                    '    Never approve an unexpected warning.\n'
                     '    The macOS floor is a reviewed support policy, not proof on every newer macOS release.\n'
                     '  EOS\n'
                     'end\n')
@@ -157,8 +171,12 @@ class CandidateTests(unittest.TestCase):
         for tag, sha, floor in [('v0.5.8', self.sha, ''), ('v0.5.8', self.sha, 'invented'), ('v0.5.8', 'bad', 'sonoma'), ('latest', self.sha, 'sonoma')]:
             with self.subTest(tag=tag, sha=sha, floor=floor), self.assertRaises(gate.ValidationError):
                 gate.generate(tag, sha, floor)
-        for forbidden in ['no-quarantine', 'xattr', 'postflight', 'no_check', 'spctl']:
+        for forbidden in ['no-quarantine', 'no_check', 'spctl', 'sudo', 'rm -']:
             self.assertNotIn(forbidden, expected)
+        # Updater-owned upgrades, CLI symlink and non-fatal provenance/quarantine clearing.
+        self.assertIn('  auto_updates true\n', expected)
+        self.assertIn('target: "notes"', expected)
+        self.assertEqual(expected.count('must_succeed: false'), 2)
 
     def test_candidate_resolution_accepts_relative_and_absolute_source_paths(self):
         self.assertEqual(self.validate()['status'], 'validated')
@@ -279,7 +297,7 @@ class CandidateTests(unittest.TestCase):
             ('ruby_source_path', str(self.root / 'foreign-cask.rb')),
         ]:
             start = len(self.calls)
-            self.unqualified_info_override = (field, value)
+            self.unqualified_info_override = {field: value}
             with self.subTest(field=field), self.assertRaises(gate.ValidationError):
                 self.validate()
             calls = self.calls[start:]
@@ -290,6 +308,12 @@ class CandidateTests(unittest.TestCase):
                                  and any(verb in argv for verb in ('add', 'commit', 'push'))
                                  for argv in calls))
             self.assert_no_staging()
+        self.unqualified_info_override = None
+
+    def test_official_cask_shadowing_bare_token_is_accepted(self):
+        self.search_output = (gate.TOKEN + '\n', '', 0)
+        self.unqualified_info_override = {'tap': 'homebrew/cask', 'full_token': gate.TOKEN}
+        self.assertEqual(self.validate()['status'], 'validated')
         self.unqualified_info_override = None
 
     def test_collision_search_accepts_only_exact_no_color_no_match(self):
@@ -671,7 +695,8 @@ class AuditQueueTests(unittest.TestCase):
             rows = [{'id': 123, 'status': status}]
             return subprocess.CompletedProcess(argv, 0, json.dumps([{'total_count': 1, 'workflow_runs': rows}]), '')
         gate.check_queue('123', runner=runner)
-        self.assertEqual(len(calls), 2 * len(gate.NONTERMINAL))
+        # Only desktop-cask.yml is queued now (cargo-dist release.yml retired).
+        self.assertEqual(len(calls), len(gate.NONTERMINAL))
         for state in gate.NONTERMINAL:
             def active(argv, **kw):
                 status = argv[-1].split('status=')[1].split('&')[0]

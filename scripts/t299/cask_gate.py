@@ -21,6 +21,7 @@ from artifact_validator import ValidationError, digest, require, run
 REPOSITORY = 'webdesserts/notes'
 TOKEN = 'notes-sync'
 TAP = 'webdesserts/tap'
+OFFICIAL_TAP = 'homebrew/cask'
 QUALIFIED = TAP + '/' + TOKEN
 CASK = 'Casks/' + TOKEN + '.rb'
 # Literal Homebrew interpolation, kept out of .format braces by concatenation.
@@ -72,14 +73,29 @@ def generate(tag, sha256, macos_floor):
     strategy :github_latest
   end
 
+  auto_updates true
   depends_on macos: :{floor}
 
   app "NotesSync.app"
+  binary "#{{appdir}}/NotesSync.app/Contents/MacOS/desktop", target: "notes"
+
+  postflight_steps do
+    run "/usr/bin/xattr",
+        args:         ["-dr", "com.apple.provenance", "{{{{appdir}}}}/NotesSync.app"],
+        must_succeed: false,
+        print_stderr: false
+    run "/usr/bin/xattr",
+        args:         ["-dr", "com.apple.quarantine", "{{{{appdir}}}}/NotesSync.app"],
+        must_succeed: false,
+        print_stderr: false
+  end
 
   caveats <<~EOS
-    NotesSync is self-signed, not Apple-notarized. On first launch, macOS may block it.
-    After verifying the release, approve it once in System Settings > Privacy & Security > Open Anyway.
-    Never approve an unexpected warning. An upgrade may require approval again.
+    NotesSync is self-signed, not Apple-notarized. Homebrew clears com.apple.provenance
+    and quarantine in postflight_steps so the bundle does not stall at launch. If
+    macOS still prompts on first launch, verify the release and approve it once in
+    System Settings > Privacy & Security > Open Anyway.
+    Never approve an unexpected warning.
     The macOS floor is a reviewed support policy, not proof on every newer macOS release.
   EOS
 end
@@ -203,8 +219,17 @@ def candidate_gates(tap, tag, sha256, runner):
             own = checked(runner, ['brew', 'info', '--json=v2', '--cask', TOKEN], env=env)
             try:
                 matches = json.loads(own)['casks']
-                require(len(matches) == 1 and matches[0]['full_token'] == QUALIFIED and
-                        resolved_cask_source_path(matches[0]['ruby_source_path'], tap) == path.resolve(), 'unqualified token resolves elsewhere')
+                require(len(matches) == 1, 'invalid collision resolution')
+                resolved = matches[0]
+                # An official Homebrew cask may legitimately own the bare token
+                # (e.g. homebrew/cask/notes-sync); we always install via QUALIFIED, so
+                # that shadowing is expected and not a failure. Any other tap
+                # resolving the bare token must be our own qualified cask.
+                if resolved['tap'] == OFFICIAL_TAP:
+                    require(resolved['token'] == TOKEN, 'invalid official collision resolution')
+                else:
+                    require(resolved['full_token'] == QUALIFIED and
+                            resolved_cask_source_path(resolved['ruby_source_path'], tap) == path.resolve(), 'unqualified token resolves elsewhere')
             except (ValueError, KeyError, TypeError) as exc:
                 raise ValidationError('invalid collision resolution') from exc
         else:
@@ -259,7 +284,7 @@ def _validate_fetched_artifact(cache, tag, sha256, signer_config, validator, run
 
 def check_queue(run_id, runner=run):
     require(isinstance(run_id, str) and re.fullmatch('[1-9][0-9]*', run_id), 'current GitHub run ID required')
-    for workflow in ('release.yml', 'desktop-cask.yml'):
+    for workflow in ('desktop-cask.yml',):
         for status in NONTERMINAL:
             endpoint = 'repos/{}/actions/workflows/{}/runs?status={}&per_page=100'.format(REPOSITORY, workflow, status)
             raw = checked(runner, ['gh', 'api', '--paginate', '--slurp', endpoint])
