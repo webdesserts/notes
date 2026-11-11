@@ -4,6 +4,7 @@
 mod app_settings;
 mod commands;
 mod daemon_task;
+mod launch_agent;
 mod notification;
 mod pair_events;
 mod pair_window;
@@ -15,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use app_settings::{AppSettings, resolve_vault_path};
+use app_settings::{AppSettings, NotesDesktopPaths, migrate_legacy_settings, resolve_vault_path};
 use daemon_task::DaemonHandle;
 use shutdown::ShutdownController;
 use sync_daemon::daemon::DaemonRunConfig;
@@ -25,7 +26,6 @@ use tauri::{
     menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
-use tauri_plugin_autostart::ManagerExt;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
@@ -100,18 +100,15 @@ fn relay_server_config(
 }
 
 fn main() -> Result<()> {
-    // Resolve the log path and create its directory before initializing tracing.
-    // Using a stable directory name so the path survives the pending
-    // `desktop` → `memory-desktop` bundle rename (app_log_dir() would move at rename).
-    // Soft-fail on mkdir error so a permissions problem doesn't prevent the app from
-    // starting — logs fall through to stderr only in that case.
-    let log_path =
-        notes_core::runtime::expand_tilde("~/Library/Logs/webdesserts-memory/desktop.log");
-    if let Some(log_dir) = log_path.parent()
-        && let Err(e) = std::fs::create_dir_all(log_dir)
-    {
-        eprintln!("warning: could not create log directory {log_dir:?}: {e}");
+    // Resolve `~/.config/notes` + `~/.local/state/notes` (app-config) before
+    // tracing so the log lands in `<state>/desktop.log`. Soft-fail on mkdir error so
+    // a permissions problem doesn't prevent the app from starting — logs fall
+    // through to stderr only in that case.
+    let paths = NotesDesktopPaths::resolve()?;
+    if let Err(e) = paths.ensure_dirs() {
+        eprintln!("warning: could not create notes config/state dirs: {e:#}");
     }
+    let log_path = paths.log_file.clone();
 
     // The WorkerGuard flushes the background log-writer thread when dropped. It must
     // remain in scope for the full duration of main() so buffered lines aren't dropped
@@ -120,19 +117,19 @@ fn main() -> Result<()> {
 
     info!("Starting NotesSync");
 
+    // One-time import of the v0.5/v0.6 `tauri-plugin-store` settings; a malformed
+    // legacy store fails loudly rather than starting unconfigured.
+    if let Some(home) = &paths.legacy_home
+        && let Some(source) = migrate_legacy_settings(home, &paths)?
+    {
+        info!(
+            "Migrated legacy settings {} -> {}",
+            source.display(),
+            paths.config_file.display()
+        );
+    }
+
     tauri::Builder::default()
-        // Plugins must be registered before setup() so that their APIs are
-        // available inside the setup hook via app.store() and app.autolaunch().
-        .plugin(tauri_plugin_store::Builder::default().build())
-        // app_name pins the LaunchAgent to ~/Library/LaunchAgents/com.webdesserts.notes-sync.plist
-        // (Label com.webdesserts.notes-sync); the default would follow productName. No extra
-        // args: the vault path is read from the store, not the CLI.
-        .plugin(
-            tauri_plugin_autostart::Builder::new()
-                .app_name("com.webdesserts.notes-sync")
-                .macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent)
-                .build(),
-        )
         .setup(move |app| {
             // --- Vault path resolution (amendment S2: daemon_config built here) ---
             //
@@ -144,7 +141,8 @@ fn main() -> Result<()> {
             // A CLI --vault flag is deliberately avoided: `tauri-cli` does not
             // forward trailing arguments to the bundled binary in `tauri dev` mode,
             // which would silently ignore the flag in development.
-            let mut settings = AppSettings::load(app.handle())?;
+            app.manage(paths.clone());
+            let mut settings = AppSettings::load(&paths)?;
             let env_vault = std::env::var("NOTES_VAULT").ok();
             let vault_path = resolve_vault_path(
                 env_vault.as_deref(),
@@ -166,7 +164,7 @@ fn main() -> Result<()> {
             // (which has no env var) still finds the right location.
             if env_vault.as_deref().is_some_and(|v| !v.is_empty()) {
                 settings.set_vault_path(vault_path.clone());
-                if let Err(e) = settings.save(app.handle()) {
+                if let Err(e) = settings.save(&paths) {
                     warn!("Failed to persist vault path to app settings: {e}");
                 }
             }
@@ -288,10 +286,9 @@ fn main() -> Result<()> {
                 .enabled(false) // display-only label, not interactive
                 .build(app)?;
 
-            // Read the autostart state from the OS (the LaunchAgent plist) to
-            // reflect what was previously registered, not what the store says.
-            // The store is written only on change; the plist is ground truth.
-            let is_autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
+            // Reconcile ~/Library/LaunchAgents with the persisted preference
+            // (default on); the plist on disk is what the checkmark shows.
+            let is_autostart_enabled = launch_agent::reconcile(&app.state::<NotesDesktopPaths>());
 
             let autostart_item = CheckMenuItemBuilder::new("Launch at Login")
                 .id("toggle-autostart")
@@ -352,52 +349,16 @@ fn main() -> Result<()> {
                         settings_window::open(&app_for_events);
                     }
                     "toggle-autostart" => {
-                        let app = app_for_events.clone();
-                        let item = autostart_item_for_events.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let autolaunch = app.autolaunch();
-
-                            // Read current state from the OS plist (ground truth).
-                            let currently_enabled = autolaunch.is_enabled().unwrap_or(false);
-
-                            // Toggle the LaunchAgent registration. Only update the
-                            // checkmark and persist the new state when the OS call
-                            // succeeds (amendment B1). On failure, warn and leave the
-                            // menu reflecting the actual registered state.
-                            let result = if currently_enabled {
-                                autolaunch.disable()
-                            } else {
-                                autolaunch.enable()
-                            };
-
-                            match result {
-                                Ok(()) => {
-                                    let new_state = !currently_enabled;
-                                    // Update the checkmark on the main thread
-                                    // (macOS panics on menu mutations off main thread).
-                                    let _ = app.run_on_main_thread(move || {
-                                        let _ = item.set_checked(new_state);
-                                    });
-                                    // Persist the new autostart state to the store.
-                                    let mut settings = match AppSettings::load(&app) {
-                                        Ok(s) => s,
-                                        Err(e) => {
-                                            warn!(
-                                                "Failed to load app settings for autostart save: {e}"
-                                            );
-                                            return;
-                                        }
-                                    };
-                                    settings.set_autostart_enabled(new_state);
-                                    if let Err(e) = settings.save(&app) {
-                                        warn!("Failed to save autostart state: {e}");
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!("Failed to toggle autostart: {e}");
-                                }
+                        // Menu events run on the main thread; the toggle is two small
+                        // file writes. On failure, show the state actually registered.
+                        let checked = match launch_agent::toggle(&app_for_events) {
+                            Ok(new_state) => new_state,
+                            Err(e) => {
+                                warn!("Failed to toggle Launch at Login: {e:#}");
+                                launch_agent::is_enabled()
                             }
-                        });
+                        };
+                        let _ = autostart_item_for_events.set_checked(checked);
                     }
                     _ => {}
                 })

@@ -17,7 +17,7 @@ use tracing::warn;
 use sync_daemon::pair_api::DaemonCommand;
 
 use crate::ControlState;
-use crate::app_settings::AppSettings;
+use crate::app_settings::{AppSettings, NotesDesktopPaths};
 
 /// Send a oneshot `DaemonCommand` and await its reply.
 ///
@@ -211,8 +211,10 @@ fn validate_vault_path(vault_path: &str) -> Result<(), String> {
 ///
 /// Absent values come back as empty strings (see [`SettingsPayload`]).
 #[tauri::command]
-pub fn get_settings(app: AppHandle) -> Result<SettingsPayload, String> {
-    let settings = AppSettings::load(&app).map_err(|e| e.to_string())?;
+pub fn get_settings(
+    paths: tauri::State<'_, NotesDesktopPaths>,
+) -> Result<SettingsPayload, String> {
+    let settings = AppSettings::load(&paths).map_err(|e| e.to_string())?;
     Ok(SettingsPayload {
         relay_url: settings.relay_url().unwrap_or_default().to_string(),
         vault_path: settings
@@ -232,14 +234,18 @@ pub fn get_settings(app: AppHandle) -> Result<SettingsPayload, String> {
 /// writes. Both fields take effect on the next app launch (see the restart notice
 /// in the panel); the running daemon is not reconfigured mid-session.
 #[tauri::command]
-pub fn save_settings(app: AppHandle, relay_url: String, vault_path: String) -> Result<(), String> {
+pub fn save_settings(
+    paths: tauri::State<'_, NotesDesktopPaths>,
+    relay_url: String,
+    vault_path: String,
+) -> Result<(), String> {
     validate_relay_url(&relay_url)?;
     validate_vault_path(&vault_path)?;
 
-    let mut settings = AppSettings::load(&app).map_err(|e| e.to_string())?;
+    let mut settings = AppSettings::load(&paths).map_err(|e| e.to_string())?;
     settings.set_relay_url(Some(relay_url));
     settings.set_vault_path(vault_path.into());
-    settings.save(&app).map_err(|e| e.to_string())
+    settings.save(&paths).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

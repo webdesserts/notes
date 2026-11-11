@@ -14,6 +14,7 @@ use rmcp::transport::streamable_http_server::{
     StreamableHttpService, session::local::LocalSessionManager,
 };
 
+pub mod cli;
 mod config;
 mod embeddings;
 mod graph;

@@ -3,9 +3,6 @@ name = "desktop"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-# Exclude from cargo-dist builds — this crate uses Tauri's own bundling pipeline.
-[package.metadata.dist]
-dist = false
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -13,16 +10,23 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 sync-daemon = { path = "../sync-daemon" }
 notes-core = { path = "../notes-core" }
-# Shared notes MCP HTTP server, run in-process (sync feature off: desktop runs sync-daemon itself)
-notes-sync = { path = "../notes-sync", default-features = false }
+# Shared notes MCP HTTP server + `notes` CLI (argv[0] dispatch). `sync` adds no
+# crates: desktop already depends on sync-daemon directly.
+notes-sync = { path = "../notes-sync", default-features = false, features = ["sync"] }
+app-config.workspace = true
+axum.workspace = true
+rand.workspace = true
+toml.workspace = true
 tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
-tauri-plugin-store = "2"
+tauri-plugin-updater = "2"
 tokio.workspace = true
 tokio-util.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

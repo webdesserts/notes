@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.6.2"
+version = "0.6.3"
 edition = "2024"
 authors = ["Michael Mullins"]
 license = "Apache-2.0"
@@ -74,7 +74,5 @@ tempfile = "3"
 # `p2p-core = { path = "../p2p-core" }` override in .cargo/config.toml.
 p2p-core = { git = "https://github.com/webdesserts/p2p-core.git", tag = "v0.1.1" }
 
-# The profile that 'dist' will build with
-[profile.dist]
-inherits = "release"
-lto = "thin"
+# XDG config/state paths + atomic 0600 writes (shared with mesh)
+app-config = { git = "https://github.com/webdesserts/app-config.git", tag = "v0.1.0" }
