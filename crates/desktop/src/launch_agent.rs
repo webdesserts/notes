@@ -75,7 +75,9 @@ impl LaunchAgent {
 
 /// Whether the login item is currently registered (plist on disk).
 pub fn is_enabled() -> bool {
-    LaunchAgent::for_user().map(|a| a.is_enabled()).unwrap_or(false)
+    LaunchAgent::for_user()
+        .map(|a| a.is_enabled())
+        .unwrap_or(false)
 }
 
 /// Canonicalize `exe` and accept it only inside an installed `.app` bundle
@@ -167,9 +169,8 @@ fn reconcile_with(
     if desired {
         // A dev build (not an installed bundle) writes nothing and leaves any
         // existing login item alone.
-        match exe.map(|exe| agent.enable_with_exe(exe)) {
-            Some(Err(e)) => tracing::warn!(error = %e, "enable LaunchAgent failed"),
-            Some(Ok(_)) | None => {}
+        if let Some(Err(e)) = exe.map(|exe| agent.enable_with_exe(exe)) {
+            tracing::warn!(error = %e, "enable LaunchAgent failed");
         }
     } else if let Err(e) = agent.disable() {
         tracing::warn!(error = %e, "disable LaunchAgent failed");
@@ -201,6 +202,49 @@ pub fn toggle(app: &AppHandle) -> Result<bool> {
     Ok(new_state)
 }
 
+/// Kickstart through launchd only when launchd started this process.
+fn should_kickstart(xpc_service_name: Option<&str>) -> bool {
+    xpc_service_name == Some(LABEL)
+}
+
+/// Relaunch the app: `launchctl kickstart -k` our own job when launchd owns this
+/// process (never `bootout`, which would kill us mid-call), else Tauri's restart.
+pub fn relaunch_app(app: &AppHandle) {
+    if should_kickstart(std::env::var("XPC_SERVICE_NAME").ok().as_deref()) {
+        // SAFETY: getuid has no preconditions and cannot fail.
+        let uid = unsafe { libc::getuid() };
+        let target = format!("gui/{uid}/{LABEL}");
+        match std::process::Command::new("/bin/launchctl")
+            .args(["kickstart", "-k", &target])
+            .status()
+        {
+            Ok(status) if status.success() => {
+                tracing::info!(%target, "launchd kickstart requested");
+                return;
+            }
+            Ok(status) => {
+                tracing::warn!(%status, "launchctl kickstart failed; falling back to restart")
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "launchctl kickstart failed; falling back to restart")
+            }
+        }
+    }
+    app.restart();
+}
+
+#[cfg(test)]
+mod kickstart_tests {
+    use super::*;
+
+    #[test]
+    fn kickstarts_only_under_our_own_launchd_job() {
+        assert!(should_kickstart(Some(LABEL)));
+        assert!(!should_kickstart(Some("com.webdesserts.mesh")));
+        assert!(!should_kickstart(None));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,26 +267,36 @@ mod tests {
     fn render_plist_escapes_and_keeps_alive_on_failure() {
         let text = render_plist(LABEL, Path::new("/Apps/A&B <x>.app/Contents/MacOS/desktop"));
         assert!(text.contains("<string>com.webdesserts.notes-sync</string>"));
-        assert!(text.contains("<string>/Apps/A&amp;B &lt;x&gt;.app/Contents/MacOS/desktop</string>"));
+        assert!(
+            text.contains("<string>/Apps/A&amp;B &lt;x&gt;.app/Contents/MacOS/desktop</string>")
+        );
         assert!(text.contains("<key>RunAtLoad</key>\n  <true/>"));
         assert!(text.contains("<key>SuccessfulExit</key>\n    <false/>"));
     }
 
     #[test]
     fn bundle_exe_validation() {
-        assert!(is_valid_bundle_exe(Path::new("/Applications/NotesSync.app/Contents/MacOS/desktop")));
+        assert!(is_valid_bundle_exe(Path::new(
+            "/Applications/NotesSync.app/Contents/MacOS/desktop"
+        )));
         assert!(!is_valid_bundle_exe(Path::new("/x/target/debug/desktop")));
         assert!(!is_valid_bundle_exe(Path::new(
             "/private/var/folders/x/AppTranslocation/ABC/d/NotesSync.app/Contents/MacOS/desktop"
         )));
-        assert!(!is_valid_bundle_exe(Path::new("/Applications/NotesSync.app/Contents/MacOS/notes")));
+        assert!(!is_valid_bundle_exe(Path::new(
+            "/Applications/NotesSync.app/Contents/MacOS/notes"
+        )));
     }
 
     #[test]
     fn enable_disable_and_invalid_exe() {
         let tmp = tempfile::tempdir().unwrap();
         let (agent, _) = fixture(tmp.path());
-        assert!(!agent.enable_with_exe(&tmp.path().join("target/debug/desktop")).unwrap());
+        assert!(
+            !agent
+                .enable_with_exe(&tmp.path().join("target/debug/desktop"))
+                .unwrap()
+        );
         assert!(!agent.is_enabled());
         // A symlink into the bundle resolves to the real binary.
         let exe = fake_bundle(tmp.path());
@@ -250,7 +304,14 @@ mod tests {
         std::os::unix::fs::symlink(&exe, &link).unwrap();
         assert!(agent.enable_with_exe(&link).unwrap());
         let text = std::fs::read_to_string(agent.plist_path()).unwrap();
-        assert!(text.contains(&std::fs::canonicalize(&exe).unwrap().to_string_lossy().to_string()));
+        assert!(
+            text.contains(
+                &std::fs::canonicalize(&exe)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            )
+        );
         agent.disable().unwrap();
         assert!(!agent.is_enabled());
         agent.disable().unwrap();
@@ -264,7 +325,10 @@ mod tests {
         let mut s = AppSettings::default();
         assert_eq!(s.autostart_enabled(), None);
         assert!(reconcile_with(&agent, &paths, &mut s, Some(&exe)));
-        assert_eq!(AppSettings::load(&paths).unwrap().autostart_enabled(), Some(true));
+        assert_eq!(
+            AppSettings::load(&paths).unwrap().autostart_enabled(),
+            Some(true)
+        );
     }
 
     #[test]
@@ -273,13 +337,20 @@ mod tests {
         let (agent, paths) = fixture(tmp.path());
         let exe = fake_bundle(tmp.path());
         std::fs::create_dir_all(agent.plist_path().parent().unwrap()).unwrap();
-        std::fs::write(agent.plist_path(), "<plist>0.6.2 plugin, no KeepAlive</plist>").unwrap();
+        std::fs::write(
+            agent.plist_path(),
+            "<plist>0.6.2 plugin, no KeepAlive</plist>",
+        )
+        .unwrap();
         let mut s = AppSettings::default();
         s.set_autostart_enabled(false);
         assert!(reconcile_with(&agent, &paths, &mut s, Some(&exe)));
         let text = std::fs::read_to_string(agent.plist_path()).unwrap();
         assert!(text.contains("<key>SuccessfulExit</key>"));
-        assert_eq!(AppSettings::load(&paths).unwrap().autostart_enabled(), Some(true));
+        assert_eq!(
+            AppSettings::load(&paths).unwrap().autostart_enabled(),
+            Some(true)
+        );
     }
 
     #[test]
@@ -291,7 +362,10 @@ mod tests {
         let mut s = AppSettings::default();
         let dev = tmp.path().join("target/debug/desktop");
         assert!(reconcile_with(&agent, &paths, &mut s, Some(&dev)));
-        assert_eq!(std::fs::read_to_string(agent.plist_path()).unwrap(), "legacy");
+        assert_eq!(
+            std::fs::read_to_string(agent.plist_path()).unwrap(),
+            "legacy"
+        );
     }
 
     #[test]

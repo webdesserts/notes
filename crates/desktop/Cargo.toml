@@ -15,6 +15,7 @@ notes-core = { path = "../notes-core" }
 notes-sync = { path = "../notes-sync", default-features = false, features = ["sync"] }
 app-config.workspace = true
 axum.workspace = true
+libc = "0.2"
 rand.workspace = true
 toml.workspace = true
 tauri = { version = "2", features = ["tray-icon"] }

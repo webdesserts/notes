@@ -24,7 +24,10 @@ use tracing::{debug, warn};
 /// `autostart_item` is included so a future settings panel can read or update
 /// the check state without rebuilding the menu. The status driver itself does
 /// not currently update it (the check state is set at startup from
-/// `autolaunch().is_enabled()` and toggled in-place by the menu-event handler).
+/// `launch_agent::reconcile` and toggled in place by the menu-event handler).
+///
+/// `Clone` so `DaemonHost` can hand a copy to each restarted status driver.
+#[derive(Clone)]
 pub struct TrayMenuHandles {
     pub status_item: tauri::menu::MenuItem<tauri::Wry>,
     pub pair_item: tauri::menu::MenuItem<tauri::Wry>,
@@ -62,7 +65,7 @@ pub fn start(
     app: AppHandle,
     handles: TrayMenuHandles,
     mut status_rx: watch::Receiver<DaemonStatus>,
-) {
+) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
         loop {
             // Wait until the status changes.
@@ -101,7 +104,7 @@ pub fn start(
                 warn!("Failed to dispatch menu update to main thread: {}", e);
             }
         }
-    });
+    })
 }
 
 #[cfg(test)]

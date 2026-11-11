@@ -3,6 +3,8 @@
 
 mod app_settings;
 mod commands;
+mod control;
+mod daemon_host;
 mod daemon_task;
 mod launch_agent;
 mod notification;
@@ -13,41 +15,29 @@ mod shutdown;
 mod tray_status;
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use anyhow::{Result, anyhow};
-use app_settings::{AppSettings, NotesDesktopPaths, migrate_legacy_settings, resolve_vault_path};
-use daemon_task::DaemonHandle;
-use shutdown::ShutdownController;
-use sync_daemon::daemon::DaemonRunConfig;
+use anyhow::{Context, Result};
+use app_settings::{NotesDesktopPaths, ensure_admin_token, migrate_legacy_settings};
+use daemon_host::{DaemonHost, HostState};
 use sync_daemon::pair_api::DaemonControl;
 use tauri::{
-    Manager,
+    AppHandle, Manager,
     menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
-use tokio::sync::Mutex;
+use tauri_plugin_updater::UpdaterExt;
 use tracing::{info, warn};
 
-/// Managed state wrapper so the Quit handler can take ownership of ShutdownController.
-type ShutdownState = Arc<Mutex<Option<ShutdownController>>>;
-
-/// Managed state for the daemon control handle, used by Tauri commands to send
-/// commands to the running daemon (pairing, discovery, etc.).
-///
-/// `Arc` because Tauri managed state requires `Send + Sync + 'static`, and
-/// `DaemonControl` holds non-`Clone` channels that can't be wrapped in plain `Mutex`
-/// without losing the ability to clone receivers. The inner fields use tokio's own
-/// thread-safe channel primitives.
+/// Live daemon control handle, cloned out of [`DaemonHost`] by command handlers
+/// (never held across a restart).
 pub type ControlState = Arc<DaemonControl>;
 
 /// The port the embedded iroh relay listens on.
 const RELAY_PORT: u16 = 3340;
 
-/// The port the local health endpoint binds on. 8081 is the conventional default
-/// but is commonly taken (e.g. llama-swap), so we standardize on 8082 across all
-/// machines. Make this env-configurable later if a machine ever needs to differ.
-const HEALTH_PORT: u16 = 8082;
+/// Default `:8082` control API address (`NOTES_CONTROL_LISTEN` overrides). 8081 is
+/// commonly taken (e.g. llama-swap), so the suite standardizes on 8082.
+const DEFAULT_CONTROL_LISTEN: &str = "127.0.0.1:8082";
 /// Default listen address for the shared notes MCP HTTP server (`NOTES_MCP_LISTEN` overrides).
 const DEFAULT_MCP_LISTEN: &str = "127.0.0.1:8083";
 
@@ -100,6 +90,12 @@ fn relay_server_config(
 }
 
 fn main() -> Result<()> {
+    // `notes` CLI through the cask's argv[0] symlink: dispatch before logs or Tauri.
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if notes::cli::should_dispatch_cli(&args) {
+        return notes::cli::run_from_os_args(args);
+    }
+
     // Resolve `~/.config/notes` + `~/.local/state/notes` (app-config) before
     // tracing so the log lands in `<state>/desktop.log`. Soft-fail on mkdir error so
     // a permissions problem doesn't prevent the app from starting — logs fall
@@ -129,99 +125,27 @@ fn main() -> Result<()> {
         );
     }
 
+    // Single instance: own `:8082` for the whole `.app` lifetime, bound before the
+    // daemon or Tauri start. A second launch (Finder double-open, login item) that
+    // finds a live instance answering there exits 0, so neither a second tray icon
+    // appears nor does `KeepAlive.SuccessfulExit = false` respawn it in a loop.
+    let control_listen = std::env::var("NOTES_CONTROL_LISTEN")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| DEFAULT_CONTROL_LISTEN.to_string());
+    let control_listener = match control::bind(&control_listen) {
+        Ok(listener) => listener,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && control::probe(&control_listen) => {
+            info!("NotesSync.app already running; exiting cleanly");
+            return Ok(());
+        }
+        Err(e) => return Err(e).with_context(|| format!("bind control API on {control_listen}")),
+    };
+    let admin_token = ensure_admin_token(&paths)?;
+
     tauri::Builder::default()
         .setup(move |app| {
-            // --- Vault path resolution (amendment S2: daemon_config built here) ---
-            //
-            // Priority: NOTES_VAULT env var > stored path from
-            // app-settings.json. The env var is always written back to the store so
-            // that autostarted instances (which launch without shell env vars) find
-            // the vault at the same location (amendment B2).
-            //
-            // A CLI --vault flag is deliberately avoided: `tauri-cli` does not
-            // forward trailing arguments to the bundled binary in `tauri dev` mode,
-            // which would silently ignore the flag in development.
             app.manage(paths.clone());
-            let mut settings = AppSettings::load(&paths)?;
-            let env_vault = std::env::var("NOTES_VAULT").ok();
-            let vault_path = resolve_vault_path(
-                env_vault.as_deref(),
-                settings.vault_path().and_then(|p| p.to_str()),
-            )
-            .ok_or_else(|| {
-                anyhow!(
-                    "NOTES_VAULT is not set and no vault path is stored.\n\
-                     Set it to the path of your Obsidian vault, e.g.:\n\
-                     \x20 NOTES_VAULT=~/notes cargo tauri dev"
-                )
-            })?;
-
-            info!("Vault: {:?}", vault_path);
-
-            // Unconditionally refresh the stored vault path whenever the env var is set
-            // (amendment B2). This keeps the stored path current if the user moves their
-            // vault and reruns with the updated env var, so a future autostarted launch
-            // (which has no env var) still finds the right location.
-            if env_vault.as_deref().is_some_and(|v| !v.is_empty()) {
-                settings.set_vault_path(vault_path.clone());
-                if let Err(e) = settings.save(&paths) {
-                    warn!("Failed to persist vault path to app settings: {e}");
-                }
-            }
-
-            // Decide whether this box runs an embedded relay SERVER, gated solely
-            // on the relay-URL setting being filled.
-            //
-            // Priority for the setting: NOTES_RELAY_URL env var > relay
-            // URL stored in app-settings.json (set via the settings panel). The env
-            // var takes precedence so stable-hostname machines (e.g. umbra) can
-            // declare their public URL; the stored value lets autostarted instances —
-            // which launch without shell env vars — still pick it up.
-            //
-            // A filled setting => this box is a SERVER: start the embedded relay and
-            // advertise the operator-declared public URL. A blank setting => this box
-            // is a LAPTOP: run NO embedded relay and advertise NO relay URL. A laptop
-            // reaches off-LAN peers by homing on the PUBLIC relays it has learned
-            // (its RelayMap, wired in a later commit), never on a private LAN-IP relay
-            // of its own — which is exactly the stale-launch-time-URL bug this kills.
-            //
-            // A server must declare its own public URL; we deliberately do NOT fall
-            // back to a detected LAN IP here, because a LAN-IP relay URL is the same
-            // unroutable-once-you-leave-the-LAN class of bug.
-            let env_relay_url = std::env::var("NOTES_RELAY_URL")
-                .ok()
-                .filter(|v| !v.is_empty());
-            let stored_relay_url = settings.relay_url().map(String::from);
-            let configured_relay_url =
-                resolve_configured_relay_url(env_relay_url.clone(), stored_relay_url.clone());
-
-            let (relay_listen, advertised_relay_url) =
-                relay_server_config(configured_relay_url.clone(), settings.relay_listen());
-
-            match &advertised_relay_url {
-                Some(url) if env_relay_url.is_some() => {
-                    info!("Relay server: advertising URL from NOTES_RELAY_URL: {}", url);
-                }
-                Some(url) => {
-                    info!("Relay server: advertising URL from stored settings: {}", url);
-                }
-                None => {
-                    info!(
-                        "No relay URL configured — running as a client (no embedded relay). \
-                         Off-LAN reach uses learned public relays; LAN uses mDNS + direct."
-                    );
-                }
-            }
-
-            let mcp_vault = vault_path.to_string_lossy().into_owned();
-
-            let daemon_config = DaemonRunConfig {
-                vault: vault_path,
-                identity_key: None,
-                health_listen: Some(format!("127.0.0.1:{}", HEALTH_PORT)),
-                relay_listen,
-                advertised_relay_url,
-            };
 
             // Tray-only mode: suppress the dock icon so the app lives entirely
             // in the menu bar. `"windows": []` in tauri.conf.json removes the
@@ -230,54 +154,6 @@ fn main() -> Result<()> {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             let handle = app.handle().clone();
-
-            // Spawn the sync daemon and block until startup completes. Returns
-            // a DaemonHandle carrying the control, cancellation token, and done_rx.
-            let daemon = DaemonHandle::spawn(daemon_config, handle.clone());
-
-            // Decompose the handle so we can move each piece to its owner:
-            // - `control` → Tauri managed state (for command handlers)
-            // - `token` + `done_rx` → ShutdownController (for Quit handler)
-            let (token, control, done_rx) = daemon.into_parts();
-
-            // Shared notes MCP HTTP server: one GraphIndex + EmbeddingManager +
-            // VaultWatcher for every local agent instead of one stdio child per
-            // agent. It stops with the sync daemon on Quit via a child token. A
-            // bind failure (port already taken) only logs a warning and leaves
-            // sync running.
-            let mcp_listen = std::env::var("NOTES_MCP_LISTEN")
-                .ok()
-                .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| DEFAULT_MCP_LISTEN.to_string());
-            let mcp_token = token.child_token();
-            tauri::async_runtime::spawn(async move {
-                info!("Notes MCP server: starting on http://{}/mcp", mcp_listen);
-                let shutdown = async move { mcp_token.cancelled().await };
-                if let Err(e) =
-                    notes::serve_http(notes::Config::new(&mcp_vault), &mcp_listen, shutdown).await
-                {
-                    warn!("Notes MCP server on {} stopped: {}", mcp_listen, e);
-                }
-            });
-
-            // Receivers cloned/extracted before control moves into Arc.
-            //
-            // `status_rx` is a watch::Receiver (Clone), but `pairing_rx` is a
-            // broadcast::Receiver (not Clone). We resubscribe from the
-            // broadcast sender via `Receiver::resubscribe` to obtain an
-            // independent stream of pairing events for the consumer task.
-            let status_rx = control.status_rx.clone();
-            let pairing_rx = control.pairing_rx.resubscribe();
-
-            // Store the DaemonControl in managed state so Tauri command handlers
-            // can access it via `State<ControlState>`.
-            let control: ControlState = Arc::new(control);
-            app.manage(control);
-
-            // Shutdown controller — taken once by the Quit handler.
-            let shutdown = ShutdownController { token, done_rx };
-            let shutdown_state: ShutdownState = Arc::new(Mutex::new(Some(shutdown)));
-            app.manage(shutdown_state);
 
             // Build the tray menu with cached item handles so the status driver
             // can update text in-place via MenuItem::set_text.
@@ -288,7 +164,7 @@ fn main() -> Result<()> {
 
             // Reconcile ~/Library/LaunchAgents with the persisted preference
             // (default on); the plist on disk is what the checkmark shows.
-            let is_autostart_enabled = launch_agent::reconcile(&app.state::<NotesDesktopPaths>());
+            let is_autostart_enabled = launch_agent::reconcile(&paths);
 
             let autostart_item = CheckMenuItemBuilder::new("Launch at Login")
                 .id("toggle-autostart")
@@ -298,10 +174,18 @@ fn main() -> Result<()> {
             let pair_item = MenuItemBuilder::new("Pair with nearby device…")
                 .id("pair")
                 .build(app)?;
+            let restart_item = MenuItemBuilder::new("Restart Daemon")
+                .id("restart-daemon")
+                .build(app)?;
+            let update_item = MenuItemBuilder::new("Check for Updates…")
+                .id("check-updates")
+                .build(app)?;
+            let settings_item = MenuItemBuilder::new("Settings…")
+                .id("settings")
+                .build(app)?;
 
-            let settings_item = MenuItemBuilder::new("Settings…").id("settings").build(app)?;
-
-            // Menu order (D1): [status, sep, autostart, sep, pair, sep, settings…, sep, quit]
+            // Menu order: [status, sep, autostart, sep, pair, sep, restart daemon,
+            // check for updates, sep, settings…, sep, quit]
             let menu = MenuBuilder::new(app)
                 .items(&[
                     &status_item,
@@ -309,6 +193,9 @@ fn main() -> Result<()> {
                     &autostart_item,
                     &PredefinedMenuItem::separator(app)?,
                     &pair_item,
+                    &PredefinedMenuItem::separator(app)?,
+                    &restart_item,
+                    &update_item,
                     &PredefinedMenuItem::separator(app)?,
                     &settings_item,
                     &PredefinedMenuItem::separator(app)?,
@@ -331,13 +218,29 @@ fn main() -> Result<()> {
                 .on_menu_event(move |_tray, event| match event.id().as_ref() {
                     "quit" => {
                         let app = app_for_events.clone();
+                        let host = app.state::<HostState>().inner().clone();
                         tauri::async_runtime::spawn(async move {
-                            let state = app.state::<ShutdownState>();
-                            let shutdown = state.lock().await.take();
-                            if let Some(s) = shutdown {
-                                s.shutdown(Duration::from_secs(5)).await;
-                            }
+                            host.shutdown_app().await;
                             app.exit(0);
+                        });
+                    }
+                    "restart-daemon" => {
+                        let host = app_for_events.state::<HostState>().inner().clone();
+                        tauri::async_runtime::spawn(async move {
+                            match host.restart().await {
+                                Ok(()) => info!("Daemon restarted from the tray"),
+                                Err(e) => warn!("Daemon restart failed: {e:#}"),
+                            }
+                        });
+                    }
+                    "check-updates" => {
+                        let app = app_for_events.clone();
+                        tauri::async_runtime::spawn(async move {
+                            match check_updates(&app).await {
+                                Ok(Some(v)) => info!("Update available: {v}"),
+                                Ok(None) => info!("NotesSync is up to date"),
+                                Err(e) => warn!("Update check failed: {e:#}"),
+                            }
                         });
                     }
                     "pair" => {
@@ -375,24 +278,30 @@ fn main() -> Result<()> {
                 })
                 .build(app)?;
 
-            // Start the tray status driver. It subscribes to status_rx and calls
-            // MenuItem::set_text on the status_item handle whenever the daemon
-            // status changes, without rebuilding the entire menu.
+            // DaemonHost owns the sync daemon, the `:8083` MCP server and the
+            // per-daemon tray-status/pairing drivers; restarts serialize on its lock.
             let handles = tray_status::TrayMenuHandles {
                 status_item,
                 pair_item,
                 autostart_item,
             };
-            tray_status::start(handle.clone(), handles, status_rx);
+            let host: HostState = Arc::new(DaemonHost::new(handle.clone(), paths.clone(), handles));
+            app.manage(host.clone());
+            tauri::async_runtime::block_on(host.start())?;
 
-            // Start the pairing-events consumer. Translates daemon-side
-            // PairingUiEvents into the responder window + macOS notification.
-            pair_events::start(handle.clone(), pairing_rx);
+            control::spawn(
+                control_listener,
+                Arc::new(control::TauriOps::new(handle.clone(), host.clone())),
+                admin_token,
+                app.package_info().version.to_string(),
+                host.control_shutdown(),
+            );
 
             Ok(())
         })
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::start_pair_discovery,
             commands::request_pairing,
@@ -409,12 +318,26 @@ fn main() -> Result<()> {
             // must NOT terminate the process. Tauri fires ExitRequested with
             // code=None whenever the last window closes; only honor it when
             // code is Some (the Quit menu calls `app.exit(0)`).
-            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = &event {
+            if let tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } = &event
+            {
                 api.prevent_exit();
             }
         });
 
     Ok(())
+}
+
+/// Tray "Check for Updates…": the latest version when a newer release exists.
+async fn check_updates(app: &AppHandle) -> Result<Option<String>> {
+    let update = app
+        .updater()
+        .context("updater unavailable")?
+        .check()
+        .await
+        .context("check for updates")?;
+    Ok(update.map(|u| u.version))
 }
 
 #[cfg(test)]

@@ -1617,6 +1617,7 @@ dependencies = [
  "anyhow",
  "app-config",
  "axum",
+ "libc",
  "notes-core",
  "notes-sync",
  "rand 0.9.2",

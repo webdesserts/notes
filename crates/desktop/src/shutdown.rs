@@ -27,15 +27,22 @@ impl ShutdownController {
     ///
     /// On timeout, logs a warning and returns; the caller should still proceed to
     /// `app.exit()` so the process exits even if the daemon hung.
-    pub async fn shutdown(self, timeout: Duration) {
+    /// Returns `true` once the watchdog confirmed the exit, `false` on timeout.
+    pub async fn shutdown(self, timeout: Duration) -> bool {
         self.token.cancel();
         match tokio::time::timeout(timeout, self.done_rx).await {
-            Ok(Ok(())) => info!("Daemon shut down cleanly"),
-            Ok(Err(_)) => info!("Daemon task completed (watchdog exited)"),
-            Err(_) => warn!(
-                "Daemon shutdown exceeded {}s — force-exiting",
-                timeout.as_secs()
-            ),
+            Ok(Ok(())) => {
+                info!("Daemon shut down cleanly");
+                true
+            }
+            Ok(Err(_)) => {
+                info!("Daemon task completed (watchdog exited)");
+                true
+            }
+            Err(_) => {
+                warn!("Daemon shutdown exceeded {}s", timeout.as_secs());
+                false
+            }
         }
     }
 }

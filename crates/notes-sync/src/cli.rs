@@ -16,7 +16,11 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(name = "notes", version, about = "Notes MCP server and P2P vault sync CLI")]
+#[command(
+    name = "notes",
+    version,
+    about = "Notes MCP server and P2P vault sync CLI"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -139,7 +143,6 @@ pub fn run_from_os_args(args: Vec<OsString>) -> anyhow::Result<()> {
 
 /// Run a parsed CLI invocation.
 pub async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
-
     match cli.command {
         // `notes` with no args → help
         None => {
@@ -255,7 +258,10 @@ mod tests {
     #[test]
     fn dispatches_only_on_argv0_stem() {
         assert!(should_dispatch_cli(&args(&["notes"])));
-        assert!(should_dispatch_cli(&args(&["/opt/homebrew/bin/notes", "mcp"])));
+        assert!(should_dispatch_cli(&args(&[
+            "/opt/homebrew/bin/notes",
+            "mcp"
+        ])));
         assert!(!should_dispatch_cli(&args(&[
             "/Applications/NotesSync.app/Contents/MacOS/desktop",
             "notes"

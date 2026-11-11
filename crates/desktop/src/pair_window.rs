@@ -10,7 +10,7 @@ use tauri::{AppHandle, Manager, TitleBarStyle, WebviewUrl, WebviewWindowBuilder,
 use tokio::sync::oneshot;
 use tracing::warn;
 
-use crate::ControlState;
+use crate::daemon_host::HostState;
 
 /// Label assigned to the initiator window. Used by capabilities and event
 /// targeting (`emit_to(labeled("pair-initiator"), ...)`).
@@ -70,7 +70,9 @@ pub fn open_initiator(app: &AppHandle) -> tauri::Result<()> {
 /// discarded — the close handler returns immediately so window teardown isn't
 /// blocked on the daemon's reply.
 fn send_cancel_initiate(app: &AppHandle) {
-    let control = app.state::<ControlState>();
+    let Some(control) = app.state::<HostState>().control() else {
+        return;
+    };
     let command_tx = control.command_tx.clone();
     let (reply_tx, reply_rx) = oneshot::channel::<()>();
 
@@ -174,7 +176,9 @@ pub fn close_responder(app: &AppHandle) {
 /// Fire `DaemonCommand::RejectInbound` so the daemon drops its in-flight
 /// responder session.
 fn send_reject_inbound(app: &AppHandle) {
-    let control = app.state::<ControlState>();
+    let Some(control) = app.state::<HostState>().control() else {
+        return;
+    };
     let command_tx = control.command_tx.clone();
     let (reply_tx, reply_rx) = oneshot::channel::<()>();
 

@@ -35,7 +35,10 @@ struct ResponderFailedPayload {
 ///
 /// Owns the broadcast `Receiver` and the `AppHandle` clone for the lifetime of
 /// the app. `start` returns immediately after spawning.
-pub fn start(app: AppHandle, mut pairing_rx: broadcast::Receiver<PairingUiEvent>) {
+pub fn start(
+    app: AppHandle,
+    mut pairing_rx: broadcast::Receiver<PairingUiEvent>,
+) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
         loop {
             match pairing_rx.recv().await {
@@ -54,7 +57,7 @@ pub fn start(app: AppHandle, mut pairing_rx: broadcast::Receiver<PairingUiEvent>
                 }
             }
         }
-    });
+    })
 }
 
 async fn handle_event(app: &AppHandle, event: PairingUiEvent) {

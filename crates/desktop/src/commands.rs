@@ -18,6 +18,13 @@ use sync_daemon::pair_api::DaemonCommand;
 
 use crate::ControlState;
 use crate::app_settings::{AppSettings, NotesDesktopPaths};
+use crate::daemon_host::HostState;
+
+/// Clone the live control handle out of the host (never held across `.await`).
+fn live_control(host: &HostState) -> Result<ControlState, String> {
+    host.control()
+        .ok_or_else(|| "Daemon is not running".to_string())
+}
 
 /// Send a oneshot `DaemonCommand` and await its reply.
 ///
@@ -63,8 +70,9 @@ pub struct PairSuccessResult {
 #[tauri::command]
 pub async fn start_pair_discovery(
     app: AppHandle,
-    control: State<'_, ControlState>,
+    host: State<'_, HostState>,
 ) -> Result<(), String> {
+    let control = live_control(&host)?;
     let (reply_tx, mut reply_rx) = mpsc::unbounded_channel();
 
     control
@@ -113,8 +121,9 @@ pub async fn start_pair_discovery(
 #[tauri::command]
 pub async fn request_pairing(
     vault_id: String,
-    control: State<'_, ControlState>,
+    host: State<'_, HostState>,
 ) -> Result<PairSuccessResult, String> {
+    let control = live_control(&host)?;
     let device_name = dispatch(&control, |reply| DaemonCommand::RequestPairing {
         vault_id,
         reply,
@@ -133,8 +142,9 @@ pub async fn request_pairing(
 pub async fn submit_pair_code(
     vault_id: String,
     code: String,
-    control: State<'_, ControlState>,
+    host: State<'_, HostState>,
 ) -> Result<PairSuccessResult, String> {
+    let control = live_control(&host)?;
     let device_name = dispatch(&control, |reply| DaemonCommand::SubmitCode {
         code,
         vault_id,
@@ -150,7 +160,8 @@ pub async fn submit_pair_code(
 /// session is currently active — handles the race where the user clicks Cancel
 /// after pairing has already completed but the window is still closing.
 #[tauri::command]
-pub async fn cancel_pair_discovery(control: State<'_, ControlState>) -> Result<(), String> {
+pub async fn cancel_pair_discovery(host: State<'_, HostState>) -> Result<(), String> {
+    let control = live_control(&host)?;
     dispatch(&control, |reply| DaemonCommand::CancelInitiate { reply }).await
 }
 
@@ -162,7 +173,8 @@ pub async fn cancel_pair_discovery(control: State<'_, ControlState>) -> Result<(
 /// inbound session is currently active — the responder window can call this
 /// safely after the daemon has already failed or completed the exchange.
 #[tauri::command]
-pub async fn reject_inbound_pair(control: State<'_, ControlState>) -> Result<(), String> {
+pub async fn reject_inbound_pair(host: State<'_, HostState>) -> Result<(), String> {
+    let control = live_control(&host)?;
     dispatch(&control, |reply| DaemonCommand::RejectInbound { reply }).await
 }
 
@@ -211,9 +223,7 @@ fn validate_vault_path(vault_path: &str) -> Result<(), String> {
 ///
 /// Absent values come back as empty strings (see [`SettingsPayload`]).
 #[tauri::command]
-pub fn get_settings(
-    paths: tauri::State<'_, NotesDesktopPaths>,
-) -> Result<SettingsPayload, String> {
+pub fn get_settings(paths: tauri::State<'_, NotesDesktopPaths>) -> Result<SettingsPayload, String> {
     let settings = AppSettings::load(&paths).map_err(|e| e.to_string())?;
     Ok(SettingsPayload {
         relay_url: settings.relay_url().unwrap_or_default().to_string(),
@@ -230,22 +240,26 @@ pub fn get_settings(
 /// Validates both fields up front (D3 relay-URL shape, D4 vault-folder existence)
 /// and returns the first error without writing anything, so a rejected save leaves
 /// the stored settings untouched. On success, loads the current settings, sets both
-/// fields, and saves once — a single atomic store flush rather than two partial
-/// writes. Both fields take effect on the next app launch (see the restart notice
-/// in the panel); the running daemon is not reconfigured mid-session.
+/// fields, and saves once (one atomic `config.toml` write). The save runs under
+/// `DaemonHost::restart_lock` and hot-restarts the daemon, so both fields take
+/// effect immediately and serialize with `POST /daemon/restart` and the tray item.
 #[tauri::command]
-pub fn save_settings(
-    paths: tauri::State<'_, NotesDesktopPaths>,
+pub async fn save_settings(
+    host: State<'_, HostState>,
     relay_url: String,
     vault_path: String,
 ) -> Result<(), String> {
     validate_relay_url(&relay_url)?;
     validate_vault_path(&vault_path)?;
 
-    let mut settings = AppSettings::load(&paths).map_err(|e| e.to_string())?;
-    settings.set_relay_url(Some(relay_url));
-    settings.set_vault_path(vault_path.into());
-    settings.save(&paths).map_err(|e| e.to_string())
+    host.restart_after(move |paths| {
+        let mut settings = AppSettings::load(paths)?;
+        settings.set_relay_url(Some(relay_url));
+        settings.set_vault_path(vault_path.into());
+        settings.save(paths)
+    })
+    .await
+    .map_err(|e| format!("{e:#}"))
 }
 
 #[cfg(test)]
