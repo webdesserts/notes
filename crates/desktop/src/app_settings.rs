@@ -263,9 +263,8 @@ pub fn migrate_legacy_settings(home: &Path, paths: &NotesDesktopPaths) -> Result
         }
         create_private_dir(&backups)?;
         let target = backup_target(&backups, dir, ts);
-        fs::rename(&legacy_dir, &target).with_context(|| {
-            format!("archive {} to {}", legacy_dir.display(), target.display())
-        })?;
+        fs::rename(&legacy_dir, &target)
+            .with_context(|| format!("archive {} to {}", legacy_dir.display(), target.display()))?;
     }
     Ok(Some(json))
 }
@@ -425,10 +424,8 @@ mod tests {
     fn layout(root: &Path) -> (PathBuf, NotesDesktopPaths) {
         let home = root.join("home");
         fs::create_dir_all(home.join("Library/Application Support")).unwrap();
-        let paths = NotesDesktopPaths::at(
-            home.join(".config/notes"),
-            home.join(".local/state/notes"),
-        );
+        let paths =
+            NotesDesktopPaths::at(home.join(".config/notes"), home.join(".local/state/notes"));
         (home, paths)
     }
 
@@ -563,7 +560,11 @@ mod tests {
         assert!(!paths.config_file.exists());
 
         AppSettings::default().save(&paths).unwrap();
-        let ns = write_legacy(&home, "com.webdesserts.notes-sync", r#"{"vault_path":"/x"}"#);
+        let ns = write_legacy(
+            &home,
+            "com.webdesserts.notes-sync",
+            r#"{"vault_path":"/x"}"#,
+        );
         assert_eq!(migrate_legacy_settings(&home, &paths).unwrap(), None);
         assert!(ns.exists());
         assert_eq!(AppSettings::load(&paths).unwrap().vault_path(), None);
@@ -581,6 +582,9 @@ mod tests {
 
         fs::write(&paths.admin_token_file, "short").unwrap();
         assert!(ensure_admin_token(&paths).is_err());
-        assert_eq!(fs::read_to_string(&paths.admin_token_file).unwrap(), "short");
+        assert_eq!(
+            fs::read_to_string(&paths.admin_token_file).unwrap(),
+            "short"
+        );
     }
 }
